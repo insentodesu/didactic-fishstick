@@ -104,6 +104,7 @@
             if (!active) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
             window._qrScanners[containerId].stream = stream;
             video.srcObject = stream;
+            video.play().catch(function() {});
             video.style.display = 'block';
             aimBox.style.display = 'block';
             hint.style.display = 'block';
