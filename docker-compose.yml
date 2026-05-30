@@ -110,28 +110,8 @@ services:
     restart: unless-stopped
 
   # ----------------------------------------------------------
-  # LLM Runtime
+  # LLM Runtime — используем AIESA cloud API (без локального Ollama)
   # ----------------------------------------------------------
-  ollama:
-    image: ollama/ollama:latest
-    container_name: finassist-ollama
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./infrastructure/ollama/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    ports:
-      - "11434:11434"
-    networks:
-      - backend
-    restart: unless-stopped
-    # Раскомментировать при наличии NVIDIA GPU:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
 
   # ----------------------------------------------------------
   # Очередь фоновых задач
@@ -224,8 +204,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      chromadb:
-        condition: service_started
       clickhouse:
         condition: service_healthy
     labels:
@@ -331,9 +309,7 @@ services:
     <<: *service-defaults
     ports:
       - "8009:8009"
-    depends_on:
-      - ollama
-      - chromadb
+    # Зависимостей нет — используем внешний AIESA API
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.llm.rule=PathPrefix(`/api/llm`)"
@@ -356,5 +332,5 @@ volumes:
   clickhouse_data:
   redis_data:
   chroma_data:
-  ollama_data:
+  uploads_data:
   uploads_data:

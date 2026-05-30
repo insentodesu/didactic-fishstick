@@ -7,13 +7,11 @@ class Settings(BaseSettings):
     secret_key: str
     jwt_algorithm: str = "HS256"
 
-    ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "llama3.1:8b"
-    ollama_timeout: int = 120
-
-    chroma_host: str = "chromadb"
-    chroma_port: int = 8000
-    chroma_collection_finance: str = "finance_docs"
+    aiesa_base_url: str = "https://api.transcription.aiesa.ru/api/v2"
+    aiesa_public_key: str
+    aiesa_secret_key: str
+    aiesa_model: str = "aiesa-pro"
+    aiesa_timeout: int = 60
 
 
 settings = Settings()
