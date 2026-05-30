@@ -19,8 +19,8 @@ services:
     image: traefik:v3.0
     container_name: finassist-traefik
     ports:
-      - "80:80"
-      - "443:443"
+      - "8090:80"
+      - "8453:443"
       - "8080:8080"       # Traefik Dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -55,28 +55,6 @@ services:
       timeout: 5s
       retries: 5
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
-    container_name: finassist-clickhouse
-    environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - ./infrastructure/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ports:
-      - "8123:8123"       # HTTP интерфейс
-      - "9000:9000"       # Native интерфейс
-    networks:
-      - backend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: finassist-redis
@@ -95,20 +73,6 @@ services:
       timeout: 5s
       retries: 5
 
-  chromadb:
-    image: chromadb/chroma:0.5.0
-    container_name: finassist-chromadb
-    environment:
-      CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: ""
-      ANONYMIZED_TELEMETRY: "false"
-    volumes:
-      - chroma_data:/chroma/chroma
-    ports:
-      - "8000:8000"
-    networks:
-      - backend
-    restart: unless-stopped
-
   # ----------------------------------------------------------
   # LLM Runtime — используем AIESA cloud API (без локального Ollama)
   # ----------------------------------------------------------
@@ -123,6 +87,11 @@ services:
     container_name: finassist-celery-worker
     command: celery -A app.worker worker --loglevel=info --concurrency=4 -Q transactions,analytics,subscriptions
     <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 300m
     depends_on:
       redis:
         condition: service_healthy
@@ -136,21 +105,14 @@ services:
     container_name: finassist-celery-beat
     command: celery -A app.worker beat --loglevel=info --scheduler redbeat.RedBeatScheduler
     <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 150m
     depends_on:
       redis:
         condition: service_healthy
-
-  flower:
-    image: mher/flower:2.0
-    container_name: finassist-flower
-    command: celery flower --broker=${CELERY_BROKER_URL} --port=5555
-    ports:
-      - "5555:5555"
-    networks:
-      - backend
-    restart: unless-stopped
-    depends_on:
-      - redis
 
   # ----------------------------------------------------------
   # Фронтенд (Flutter PWA → nginx)
@@ -217,26 +179,6 @@ services:
       - "traefik.http.routers.transactions.middlewares=strip-api"
       - "traefik.http.routers.transactions.priority=10"
       - "traefik.http.services.transactions.loadbalancer.server.port=8002"
-
-  analytics-service:
-    build:
-      context: ./services/analytics-service
-      dockerfile: Dockerfile
-    container_name: finassist-analytics
-    <<: *service-defaults
-    ports:
-      - "8003:8003"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
-      - "traefik.http.routers.analytics.middlewares=strip-api"
-      - "traefik.http.routers.analytics.priority=10"
-      - "traefik.http.services.analytics.loadbalancer.server.port=8003"
 
   subscription-service:
     build:
@@ -368,8 +310,5 @@ networks:
 # ----------------------------------------------------------
 volumes:
   postgres_data:
-  clickhouse_data:
   redis_data:
-  chroma_data:
-  uploads_data:
   uploads_data:

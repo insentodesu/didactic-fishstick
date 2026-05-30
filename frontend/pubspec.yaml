@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   file_picker: ^8.1.2
-  mobile_scanner: ^5.2.3
   shared_preferences: ^2.3.2
   web: ^1.1.1
   http: ^1.2.1

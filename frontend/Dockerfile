@@ -8,9 +8,7 @@ RUN flutter pub get
 
 COPY . .
 
-RUN flutter build web --release \
-    --web-renderer html \
-    --dart-define=FLUTTER_WEB_USE_SKIA=false
+RUN flutter build web --release
 
 # Stage 2: раздача через nginx
 FROM nginx:1.27-alpine
