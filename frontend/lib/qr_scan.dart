@@ -28,7 +28,9 @@ Future<Map<String, dynamic>> uploadReceiptQr(String rawQr) async {
 
 // ---------------------------------------------------------------------------
 // Экран сканирования QR через браузерный getUserMedia + jsQR.
-// Камера запрашивается нативно браузером — разрешение появляется автоматически.
+//
+// Камера запускается ТОЛЬКО по явному тапу пользователя — это требование
+// Safari: getUserMedia должен вызываться синхронно из жеста (tap/click).
 // ---------------------------------------------------------------------------
 class QrScanScreen extends StatefulWidget {
   const QrScanScreen({super.key});
@@ -39,14 +41,14 @@ class QrScanScreen extends StatefulWidget {
 class _QrScanScreenState extends State<QrScanScreen> {
   late final String _viewId;
   bool _handled = false;
+  bool _cameraStarted = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _viewId = 'qr-scanner-${DateTime.now().millisecondsSinceEpoch}';
-
-    // Регистрируем фабрику платформенного вью — создаёт div-контейнер с нужным id.
+    // Регистрируем div-контейнер — он будет в DOM до первого тапа пользователя.
     ui_web.platformViewRegistry.registerViewFactory(_viewId, (int id) {
       return web.HTMLDivElement()
         ..id = _viewId
@@ -54,15 +56,11 @@ class _QrScanScreenState extends State<QrScanScreen> {
         ..style.height = '100%'
         ..style.overflow = 'hidden';
     });
-
-    // Запускаем сканер после первого frame, чтобы div успел войти в DOM.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future.delayed(const Duration(milliseconds: 150), _startScanner);
-    });
   }
 
-  void _startScanner() {
-    if (!mounted) return;
+  // Вызывается синхронно из onTap — сохраняет контекст жеста для Safari.
+  void _onStartCamera() {
+    setState(() => _cameraStarted = true);
     _initQrScanner(
       _viewId,
       ((JSString code) {
@@ -96,39 +94,99 @@ class _QrScanScreenState extends State<QrScanScreen> {
       body: Stack(
         alignment: Alignment.center,
         children: [
+          // Платформенный вью всегда в DOM, чтобы div был доступен до тапа.
+          Positioned.fill(
+            child: HtmlElementView(viewType: _viewId),
+          ),
+
+          // Оверлей "включить камеру" — показываем пока камера не запущена.
+          if (!_cameraStarted && _error == null)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _onStartCamera,
+                child: Container(
+                  color: Colors.black,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: .12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.camera_alt,
+                            color: Colors.white, size: 38),
+                      ),
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Нажмите для включения камеры',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Браузер запросит разрешение на доступ к камере',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 13,
+                            height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Ошибка доступа к камере
           if (_error != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
+            Positioned.fill(
+              child: Container(
+                color: Colors.black,
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.videocam_off, color: Colors.white54, size: 56),
+                    const Icon(Icons.videocam_off,
+                        color: Colors.white38, size: 56),
                     const SizedBox(height: 16),
                     Text(
                       'Нет доступа к камере:\n$_error',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 14, height: 1.5),
+                          color: Colors.white60,
+                          fontSize: 13,
+                          height: 1.5),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () {
+                        setState(() {
+                          _error = null;
+                          _cameraStarted = false;
+                        });
+                      },
                       style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
                           side: const BorderSide(color: Colors.white38)),
-                      child: const Text('Назад'),
+                      child: const Text('Попробовать снова'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Назад',
+                          style: TextStyle(color: Colors.white38)),
                     ),
                   ],
                 ),
               ),
-            )
-          else ...[
-            // Видеопоток — занимает весь экран
-            Positioned.fill(
-              child: HtmlElementView(viewType: _viewId),
             ),
-            // Рамка прицела
+
+          // Рамка прицела — только когда камера активна
+          if (_cameraStarted && _error == null)
             Container(
               width: 240,
               height: 240,
@@ -137,7 +195,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
                 borderRadius: BorderRadius.circular(20),
               ),
             ),
-          ],
+
           // Подсказка внизу
           Positioned(
             bottom: 60,
@@ -149,12 +207,13 @@ class _QrScanScreenState extends State<QrScanScreen> {
                 color: Colors.black.withValues(alpha: .6),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
-                'Наведите камеру на QR-код в нижней части чека. '
-                'Данные будут отправлены на сервер для обработки.',
+              child: Text(
+                _cameraStarted && _error == null
+                    ? 'Наведите камеру на QR-код в нижней части чека.'
+                    : 'QR-код находится в нижней части бумажного чека.',
                 textAlign: TextAlign.center,
-                style:
-                    TextStyle(color: Colors.white, fontSize: 13.5, height: 1.4),
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 13.5, height: 1.4),
               ),
             ),
           ),

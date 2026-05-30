@@ -46,16 +46,12 @@
   <script>
     window._qrScanners = {};
 
-    // Запускает камеру и сканирование QR внутри div с id=containerId.
-    // onResult(code: string) — вызывается при успешном распознавании.
-    // onError(msg: string)  — вызывается при ошибке доступа к камере.
+    // Вызывается синхронно из жеста (onTap в Dart) — контейнер уже в DOM.
+    // getUserMedia вызывается в контексте пользовательского жеста — Safari OK.
     window.initQrScanner = function(containerId, onResult, onError) {
       var container = document.getElementById(containerId);
       if (!container) {
-        // Элемент ещё не в DOM — повторим через 100 мс.
-        setTimeout(function() {
-          window.initQrScanner(containerId, onResult, onError);
-        }, 100);
+        if (onError) onError('Camera container not found in DOM');
         return;
       }
 
@@ -63,10 +59,7 @@
       video.setAttribute('playsinline', 'true');
       video.setAttribute('autoplay', 'true');
       video.setAttribute('muted', 'true');
-      video.style.width = '100%';
-      video.style.height = '100%';
-      video.style.objectFit = 'cover';
-      video.style.display = 'block';
+      video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
 
       var canvas = document.createElement('canvas');
       canvas.style.display = 'none';
@@ -78,13 +71,10 @@
       var active = true;
       var found = false;
 
-      window._qrScanners[containerId] = {
-        stop: function() { active = false; },
-        stream: null,
-      };
+      window._qrScanners[containerId] = { stop: function() { active = false; }, stream: null };
 
-      navigator.mediaDevices
-        .getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+      // Вызов getUserMedia здесь — синхронно из tap-обработчика Dart.
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
         .then(function(stream) {
           if (!active) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
           window._qrScanners[containerId].stream = stream;
@@ -102,28 +92,27 @@
           canvas.height = video.videoHeight;
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          var code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert',
-          });
-          if (code && code.data) {
-            found = true;
-            active = false;
-            if (onResult) onResult(code.data);
-            return;
+          if (typeof jsQR !== 'undefined') {
+            var code = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: 'dontInvert',
+            });
+            if (code && code.data) {
+              found = true;
+              active = false;
+              if (onResult) onResult(code.data);
+              return;
+            }
           }
         }
         requestAnimationFrame(scan);
       }
     };
 
-    // Останавливает камеру и освобождает ресурсы.
     window.stopQrScanner = function(containerId) {
       var sc = window._qrScanners[containerId];
       if (sc) {
         sc.stop();
-        if (sc.stream) {
-          sc.stream.getTracks().forEach(function(t) { t.stop(); });
-        }
+        if (sc.stream) sc.stream.getTracks().forEach(function(t) { t.stop(); });
         delete window._qrScanners[containerId];
       }
     };
