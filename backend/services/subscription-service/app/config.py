@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     redis_url: str
     gmail_client_id: str = ""
     gmail_client_secret: str = ""
+    transaction_service_url: str = "http://transaction-service:8002"
 
 
 settings = Settings()

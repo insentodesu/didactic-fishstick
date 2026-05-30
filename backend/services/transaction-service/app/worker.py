@@ -87,7 +87,17 @@ def recategorize_user(user_id: str):
     pass  # TODO: batch LLM classify
 
 
-@app.task
+@app.task(max_retries=2, default_retry_delay=10)
 def detect_subscriptions(user_id: str):
-    """Анализирует транзакции на предмет регулярных подписок."""
-    pass  # Делегируется subscription-service через внутренний HTTP
+    """Делегирует детект подписок в subscription-service через HTTP."""
+    import httpx
+
+    subscription_service_url = settings.celery_broker_url.replace("redis://", "").split("/")[0]
+    # Вызываем subscription-service scan endpoint
+    try:
+        # Используем синхронный httpx для Celery
+        url = "http://subscription-service:8004/subscriptions/scan"
+        with httpx.Client(timeout=30.0) as client:
+            client.post(url, headers={"X-Internal-User-Id": user_id})
+    except Exception:
+        pass  # Non-critical — subscriptions detected on next scan

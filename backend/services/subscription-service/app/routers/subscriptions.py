@@ -101,14 +101,112 @@ async def delete_subscription(
     await db.commit()
 
 
+@router.get("/summary")
+async def subscription_summary(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Сводка подписок: итог в месяц, %% от дохода, список."""
+    row = await db.execute(text("""
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'active') AS active_count,
+            COUNT(*) FILTER (WHERE status = 'suspicious') AS suspicious_count,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'active' AND billing_period = 'monthly'), 0) AS monthly_total,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'active' AND billing_period = 'yearly') / 12, 0) AS yearly_per_month
+        FROM subscriptions.subscriptions WHERE user_id = :uid
+    """), {"uid": user_id})
+    stats = dict(row.mappings().one())
+    total = float(stats["monthly_total"]) + float(stats["yearly_per_month"])
+    stats["total_monthly"] = total
+    rows = await db.execute(text("""
+        SELECT name, amount, billing_period, next_billing_date, status, category
+        FROM subscriptions.subscriptions
+        WHERE user_id = :uid AND status = 'active'
+        ORDER BY amount DESC LIMIT 10
+    """), {"uid": user_id})
+    stats["items"] = [dict(r._mapping) for r in rows]
+    return stats
+
+
+@router.post("/")
+async def create_subscription(
+    name: str,
+    amount: float,
+    billing_period: str = "monthly",
+    category: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Ручное добавление подписки."""
+    import uuid
+    from datetime import date, timedelta
+    sub_id = str(uuid.uuid4())
+    next_date = date.today() + timedelta(days=30 if billing_period == "monthly" else 7 if billing_period == "weekly" else 365)
+    await db.execute(text("""
+        INSERT INTO subscriptions.subscriptions
+            (id, user_id, name, amount, billing_period, next_billing_date, category, source, status)
+        VALUES (:id, :uid, :name, :amount, :period, :next, :cat, 'manual', 'active')
+    """), {"id": sub_id, "uid": user_id, "name": name, "amount": amount, "period": billing_period, "next": next_date, "cat": category})
+    await db.commit()
+    return {"id": sub_id, "status": "created"}
+
+
 @router.post("/scan")
 async def scan_transactions(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
     """Сканирует транзакции пользователя для поиска подписок."""
-    # TODO: запрос в transaction-service + вызов detector.detect_recurring
-    return {"status": "queued", "message": "Сканирование запущено. Результат появится через 10-20 секунд."}
+    import httpx
+    from app.config import settings
+    from app.services.detector import detect_recurring
+    import uuid
+    from datetime import date, timedelta
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{settings.transaction_service_url}/transactions/",
+                params={"page_size": 500},
+                headers={"X-Internal": "true"},
+            )
+            if not resp.is_success:
+                return {"status": "error", "message": "Не удалось получить транзакции"}
+            txs = resp.json().get("items", [])
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+    detected = detect_recurring(txs)
+    saved = 0
+
+    for sub in detected:
+        existing = await db.execute(text("""
+            SELECT id FROM subscriptions.subscriptions
+            WHERE user_id = :uid AND merchant_pattern = :pattern
+        """), {"uid": user_id, "pattern": sub.merchant_name})
+        if existing.first():
+            continue
+
+        await db.execute(text("""
+            INSERT INTO subscriptions.subscriptions
+                (id, user_id, name, amount, billing_period, next_billing_date,
+                 last_billing_date, merchant_pattern, source, status)
+            VALUES (:id, :uid, :name, :amount, :period, :next, :last, :pattern, 'auto', 'active')
+            ON CONFLICT DO NOTHING
+        """), {
+            "id": str(uuid.uuid4()),
+            "uid": user_id,
+            "name": sub.canonical_name,
+            "amount": float(sub.amount),
+            "period": sub.billing_period,
+            "next": sub.next_billing_date,
+            "last": sub.last_billing_date,
+            "pattern": sub.merchant_name,
+        })
+        saved += 1
+
+    await db.commit()
+    return {"status": "done", "detected": len(detected), "saved": saved}
 
 
 @router.post("/gmail/scan")

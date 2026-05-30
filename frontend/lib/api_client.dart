@@ -360,3 +360,56 @@ Future<void> markAllNotificationsRead() async {
   await loadToken();
   await http.put(_uri('/notifications/read-all'), headers: _headers());
 }
+
+// ---------------------------------------------------------------------------
+// Аналитика — кредитный светофор + прогноз
+// ---------------------------------------------------------------------------
+
+Future<Map<String, dynamic>> getTrafficLight({bool demo = false}) async {
+  await loadToken();
+  final uri = _uri('/analytics/traffic-light').replace(queryParameters: demo ? {'demo': 'true'} : null);
+  final resp = await http.get(uri, headers: _headers());
+  return _decode<Map<String, dynamic>>(resp);
+}
+
+Future<Map<String, dynamic>> getForecast({bool demo = false, int months = 6}) async {
+  await loadToken();
+  final uri = _uri('/analytics/forecast').replace(queryParameters: {'months': months.toString(), if (demo) 'demo': 'true'});
+  final resp = await http.get(uri, headers: _headers());
+  return _decode<Map<String, dynamic>>(resp);
+}
+
+Future<Map<String, dynamic>> postOnboarding({
+  required double monthlyIncome,
+  required bool hasCredits,
+  required double monthlyDebtPayment,
+  required List<String> goals,
+  List<String> barriers = const [],
+  String? statementId,
+}) async {
+  await loadToken();
+  final resp = await http.post(
+    _uri('/analytics/onboarding'),
+    headers: _headers(),
+    body: jsonEncode({
+      'monthly_income': monthlyIncome,
+      'has_credits': hasCredits,
+      'monthly_debt_payment': monthlyDebtPayment,
+      'goals': goals,
+      'barriers': barriers,
+      if (statementId != null) 'statement_id': statementId,
+    }),
+  );
+  return _decode<Map<String, dynamic>>(resp);
+}
+
+// ---------------------------------------------------------------------------
+// Простая модель транзакции для AddTxSheet
+// ---------------------------------------------------------------------------
+
+class Tx {
+  final int id;
+  final String name, cat, date;
+  final double amount;
+  const Tx(this.id, this.name, this.cat, this.amount, this.date);
+}
