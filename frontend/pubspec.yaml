@@ -9,10 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  file_picker: ^8.1.2      # выбор файла выписки (отправляется на бэкенд)
-  mobile_scanner: ^5.2.3   # сканирование QR на чеке (getUserMedia в браузере)
-  shared_preferences: ^2.3.2  # запомнить, что онбординг пройден
+  file_picker: ^8.1.2
+  mobile_scanner: ^5.2.3
+  shared_preferences: ^2.3.2
   web: ^1.1.1
+  http: ^1.2.1
 
 flutter:
   uses-material-design: true

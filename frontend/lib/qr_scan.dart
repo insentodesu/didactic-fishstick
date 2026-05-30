@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'api_client.dart' as api;
+
 // ---------------------------------------------------------------------------
 // Отправка сырого содержимого QR чека на бэкенд.
 //
@@ -18,11 +20,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 //
 // Сейчас — заглушка с задержкой, чтобы UI работал end-to-end.
 // ---------------------------------------------------------------------------
-Future<void> uploadReceiptQr(String rawQr) async {
-  // ignore: avoid_print
-  print('uploadReceiptQr: "$rawQr" -> backend');
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  // throw Exception('...') — при ошибке отправки.
+Future<Map<String, dynamic>> uploadReceiptQr(String rawQr) async {
+  return api.scanReceiptQr(rawQr);
 }
 
 // ---------------------------------------------------------------------------

@@ -153,7 +153,27 @@ services:
       - redis
 
   # ----------------------------------------------------------
+  # Фронтенд (Flutter PWA → nginx)
+  # ----------------------------------------------------------
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: finassist-frontend
+    restart: unless-stopped
+    networks:
+      - backend
+      - frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+  # ----------------------------------------------------------
   # Микросервисы
+  # strip-api middleware: снимает /api перед передачей в сервис
+  # /api/auth/login → auth-service → /auth/login
   # ----------------------------------------------------------
   auth-service:
     build:
@@ -170,7 +190,10 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
+      - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`) || PathPrefix(`/api/users`)"
+      - "traefik.http.routers.auth.middlewares=strip-api"
+      - "traefik.http.routers.auth.priority=10"
       - "traefik.http.services.auth.loadbalancer.server.port=8001"
 
   transaction-service:
@@ -191,6 +214,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.transactions.rule=PathPrefix(`/api/transactions`)"
+      - "traefik.http.routers.transactions.middlewares=strip-api"
+      - "traefik.http.routers.transactions.priority=10"
       - "traefik.http.services.transactions.loadbalancer.server.port=8002"
 
   analytics-service:
@@ -209,6 +234,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
+      - "traefik.http.routers.analytics.middlewares=strip-api"
+      - "traefik.http.routers.analytics.priority=10"
       - "traefik.http.services.analytics.loadbalancer.server.port=8003"
 
   subscription-service:
@@ -227,6 +254,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.subscriptions.rule=PathPrefix(`/api/subscriptions`)"
+      - "traefik.http.routers.subscriptions.middlewares=strip-api"
+      - "traefik.http.routers.subscriptions.priority=10"
       - "traefik.http.services.subscriptions.loadbalancer.server.port=8004"
 
   investment-service:
@@ -245,6 +274,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.investments.rule=PathPrefix(`/api/investments`)"
+      - "traefik.http.routers.investments.middlewares=strip-api"
+      - "traefik.http.routers.investments.priority=10"
       - "traefik.http.services.investments.loadbalancer.server.port=8005"
 
   gamification-service:
@@ -263,6 +294,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.gamification.rule=PathPrefix(`/api/gamification`)"
+      - "traefik.http.routers.gamification.middlewares=strip-api"
+      - "traefik.http.routers.gamification.priority=10"
       - "traefik.http.services.gamification.loadbalancer.server.port=8006"
 
   notification-service:
@@ -281,6 +314,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.notifications.rule=PathPrefix(`/api/notifications`) || PathPrefix(`/ws`)"
+      - "traefik.http.routers.notifications.middlewares=strip-api"
+      - "traefik.http.routers.notifications.priority=10"
       - "traefik.http.services.notifications.loadbalancer.server.port=8007"
 
   receipt-service:
@@ -299,6 +334,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.receipts.rule=PathPrefix(`/api/receipts`)"
+      - "traefik.http.routers.receipts.middlewares=strip-api"
+      - "traefik.http.routers.receipts.priority=10"
       - "traefik.http.services.receipts.loadbalancer.server.port=8008"
 
   llm-service:
@@ -313,6 +350,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.llm.rule=PathPrefix(`/api/llm`)"
+      - "traefik.http.routers.llm.middlewares=strip-api"
+      - "traefik.http.routers.llm.priority=10"
       - "traefik.http.services.llm.loadbalancer.server.port=8009"
 
 # ----------------------------------------------------------

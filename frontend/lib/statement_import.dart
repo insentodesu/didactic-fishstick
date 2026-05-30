@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'api_client.dart' as api;
 
 // Локальные токены (Dart не делит private-символы между файлами).
 const _green = Color(0xFF2A4D3E);
@@ -48,10 +52,7 @@ Future<PickedStatement?> pickStatementFile() async {
 // Сейчас — заглушка с искусственной задержкой, чтобы UI работал end-to-end.
 // ---------------------------------------------------------------------------
 Future<void> uploadStatement(PickedStatement file) async {
-  // ignore: avoid_print
-  print('uploadStatement: ${file.fileName}, ${file.bytes.length} bytes -> backend');
-  await Future<void>.delayed(const Duration(milliseconds: 800));
-  // throw Exception('...') — при ошибке загрузки.
+  await api.uploadStatement(Uint8List.fromList(file.bytes), file.fileName);
 }
 
 // ---------------------------------------------------------------------------
