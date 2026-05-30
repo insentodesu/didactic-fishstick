@@ -1,0 +1,28 @@
+http:
+  middlewares:
+    cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+        accessControlAllowHeaders:
+          - "*"
+        accessControlAllowOriginList:
+          - "http://localhost:3000"
+          - "https://finassist.ru"
+        accessControlMaxAge: 100
+        addVaryHeader: true
+
+    auth-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50

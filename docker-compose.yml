@@ -1,0 +1,360 @@
+version: "3.9"
+
+# ============================================================
+# Финансовый ассистент — полный стек
+# ============================================================
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  env_file: .env
+  networks:
+    - backend
+
+services:
+
+  # ----------------------------------------------------------
+  # Реверс-прокси и API Gateway
+  # ----------------------------------------------------------
+  traefik:
+    image: traefik:v3.0
+    container_name: finassist-traefik
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"       # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infrastructure/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infrastructure/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    networks:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Базы данных
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: finassist-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: finassist-clickhouse
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infrastructure/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "8123:8123"       # HTTP интерфейс
+      - "9000:9000"       # Native интерфейс
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: finassist-redis
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:0.5.0
+    container_name: finassist-chromadb
+    environment:
+      CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: ""
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # LLM Runtime
+  # ----------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: finassist-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./infrastructure/ollama/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "11434:11434"
+    networks:
+      - backend
+    restart: unless-stopped
+    # Раскомментировать при наличии NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ----------------------------------------------------------
+  # Очередь фоновых задач
+  # ----------------------------------------------------------
+  celery-worker:
+    build:
+      context: ./services/transaction-service
+      dockerfile: Dockerfile
+    container_name: finassist-celery-worker
+    command: celery -A app.worker worker --loglevel=info --concurrency=4 -Q transactions,analytics,subscriptions
+    <<: *service-defaults
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: ./services/transaction-service
+      dockerfile: Dockerfile
+    container_name: finassist-celery-beat
+    command: celery -A app.worker beat --loglevel=info --scheduler redbeat.RedBeatScheduler
+    <<: *service-defaults
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  flower:
+    image: mher/flower:2.0
+    container_name: finassist-flower
+    command: celery flower --broker=${CELERY_BROKER_URL} --port=5555
+    ports:
+      - "5555:5555"
+    networks:
+      - backend
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  # ----------------------------------------------------------
+  # Микросервисы
+  # ----------------------------------------------------------
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: finassist-auth
+    <<: *service-defaults
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
+      - "traefik.http.services.auth.loadbalancer.server.port=8001"
+
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+      dockerfile: Dockerfile
+    container_name: finassist-transactions
+    <<: *service-defaults
+    ports:
+      - "8002:8002"
+    volumes:
+      - uploads_data:/tmp/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.transactions.rule=PathPrefix(`/api/transactions`)"
+      - "traefik.http.services.transactions.loadbalancer.server.port=8002"
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: finassist-analytics
+    <<: *service-defaults
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
+      - "traefik.http.services.analytics.loadbalancer.server.port=8003"
+
+  subscription-service:
+    build:
+      context: ./services/subscription-service
+      dockerfile: Dockerfile
+    container_name: finassist-subscriptions
+    <<: *service-defaults
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.subscriptions.rule=PathPrefix(`/api/subscriptions`)"
+      - "traefik.http.services.subscriptions.loadbalancer.server.port=8004"
+
+  investment-service:
+    build:
+      context: ./services/investment-service
+      dockerfile: Dockerfile
+    container_name: finassist-investments
+    <<: *service-defaults
+    ports:
+      - "8005:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.investments.rule=PathPrefix(`/api/investments`)"
+      - "traefik.http.services.investments.loadbalancer.server.port=8005"
+
+  gamification-service:
+    build:
+      context: ./services/gamification-service
+      dockerfile: Dockerfile
+    container_name: finassist-gamification
+    <<: *service-defaults
+    ports:
+      - "8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gamification.rule=PathPrefix(`/api/gamification`)"
+      - "traefik.http.services.gamification.loadbalancer.server.port=8006"
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: finassist-notifications
+    <<: *service-defaults
+    ports:
+      - "8007:8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.notifications.rule=PathPrefix(`/api/notifications`) || PathPrefix(`/ws`)"
+      - "traefik.http.services.notifications.loadbalancer.server.port=8007"
+
+  receipt-service:
+    build:
+      context: ./services/receipt-service
+      dockerfile: Dockerfile
+    container_name: finassist-receipts
+    <<: *service-defaults
+    ports:
+      - "8008:8008"
+    volumes:
+      - uploads_data:/tmp/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.receipts.rule=PathPrefix(`/api/receipts`)"
+      - "traefik.http.services.receipts.loadbalancer.server.port=8008"
+
+  llm-service:
+    build:
+      context: ./services/llm-service
+      dockerfile: Dockerfile
+    container_name: finassist-llm
+    <<: *service-defaults
+    ports:
+      - "8009:8009"
+    depends_on:
+      - ollama
+      - chromadb
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.llm.rule=PathPrefix(`/api/llm`)"
+      - "traefik.http.services.llm.loadbalancer.server.port=8009"
+
+# ----------------------------------------------------------
+# Сети
+# ----------------------------------------------------------
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+# ----------------------------------------------------------
+# Тома
+# ----------------------------------------------------------
+volumes:
+  postgres_data:
+  clickhouse_data:
+  redis_data:
+  chroma_data:
+  ollama_data:
+  uploads_data:
