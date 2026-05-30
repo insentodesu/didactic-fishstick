@@ -61,7 +61,7 @@ class _LessonsScreenState extends State<LessonsScreen> {
   }
 
   Widget _progressCard() {
-    const total = _lessons.length;
+    final total = _lessons.length;
     const done = 2;
     return FpCard(
       child: Column(
