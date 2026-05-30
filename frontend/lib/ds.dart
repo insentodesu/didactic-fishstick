@@ -281,6 +281,7 @@ class FpRing extends StatelessWidget {
   final Color color;
   final Color track;
   final Widget? child;
+  final Duration animDuration;
 
   const FpRing({
     super.key,
@@ -290,22 +291,29 @@ class FpRing extends StatelessWidget {
     this.color = kGreen,
     this.track = kGreenBg,
     this.child,
+    this.animDuration = const Duration(milliseconds: 900),
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: Size(size, size),
-            painter: _RingPainter(value: value.clamp(0, 100), color: color, track: track, stroke: stroke),
-          ),
-          if (child != null) child!,
-        ],
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: value),
+      duration: animDuration,
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, v, innerChild) => SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            CustomPaint(
+              size: Size(size, size),
+              painter: _RingPainter(value: v.clamp(0, 100), color: color, track: track, stroke: stroke),
+            ),
+            if (innerChild != null) innerChild,
+          ],
+        ),
       ),
     );
   }
@@ -379,8 +387,15 @@ class FpNeedsBar extends StatelessWidget {
   final String label;
   final double value; // 0–100
   final Color color;
+  final Duration animDuration;
 
-  const FpNeedsBar({super.key, required this.label, required this.value, required this.color});
+  const FpNeedsBar({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.animDuration = const Duration(milliseconds: 800),
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -398,13 +413,18 @@ class FpNeedsBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: kLine),
             ),
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: (value / 100).clamp(0.0, 1.0),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(999),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: (value / 100).clamp(0.0, 1.0)),
+              duration: animDuration,
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: v,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
               ),
             ),
@@ -433,4 +453,168 @@ String fmtRub(double n) {
 
 String fmtRubSigned(double n) {
   return '${n >= 0 ? '+' : ''}${fmtRub(n)}';
+}
+
+// ============================================================
+// FpFadeIn — fade + slide-up on mount, supports stagger delay
+// ============================================================
+
+class FpFadeIn extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+  final Duration duration;
+  final double offsetY;
+
+  const FpFadeIn({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+    this.duration = const Duration(milliseconds: 420),
+    this.offsetY = 18,
+  });
+
+  @override
+  State<FpFadeIn> createState() => _FpFadeInState();
+}
+
+class _FpFadeInState extends State<FpFadeIn> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: widget.duration);
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: Offset(0, widget.offsetY / 300),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    if (widget.delay == Duration.zero) {
+      _ctrl.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _ctrl.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(position: _slide, child: widget.child),
+    );
+  }
+}
+
+// ============================================================
+// _SkeletonBone — for loading skeletons
+// ============================================================
+
+class FpSkeletonBone extends StatelessWidget {
+  final double? width;
+  final double height;
+  final double radius;
+  final Color color;
+
+  const FpSkeletonBone({
+    super.key,
+    this.width,
+    required this.height,
+    this.radius = 10,
+    this.color = kLine,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// FpSkeleton — shimmer loading placeholder
+// ============================================================
+
+class FpSkeleton extends StatefulWidget {
+  final Widget child;
+  const FpSkeleton({super.key, required this.child});
+
+  @override
+  State<FpSkeleton> createState() => _FpSkeletonState();
+}
+
+class _FpSkeletonState extends State<FpSkeleton> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        final t = (_ctrl.value * 2 - 1).abs();
+        final shade = Color.lerp(const Color(0xFFECE6D6), const Color(0xFFF8F4EA), t)!;
+        return _FpSkeletonTheme(color: shade, child: widget.child);
+      },
+    );
+  }
+}
+
+class _FpSkeletonTheme extends InheritedWidget {
+  final Color color;
+  const _FpSkeletonTheme({required this.color, required super.child});
+
+  static Color of(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<_FpSkeletonTheme>()?.color ?? kLine;
+  }
+
+  @override
+  bool updateShouldNotify(_FpSkeletonTheme old) => old.color != color;
+}
+
+class FpBone extends StatelessWidget {
+  final double? width;
+  final double height;
+  final double radius;
+
+  const FpBone({super.key, this.width, required this.height, this.radius = 10});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: _FpSkeletonTheme.of(context),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
 }

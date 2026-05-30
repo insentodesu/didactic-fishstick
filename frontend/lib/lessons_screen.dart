@@ -42,14 +42,14 @@ class _LessonsScreenState extends State<LessonsScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
               children: [
-                FpOverline('Уроки'),
+                FpFadeIn(delay: Duration.zero, child: FpOverline('Уроки')),
                 const SizedBox(height: 8),
-                Text('6 уроков · 2–5 минут каждый', style: dsSmall(color: kInk2)),
+                FpFadeIn(delay: const Duration(milliseconds: 40), child: Text('6 уроков · 2–5 минут каждый', style: dsSmall(color: kInk2))),
                 const SizedBox(height: 16),
-                _progressCard(),
+                FpFadeIn(delay: const Duration(milliseconds: 80), child: _progressCard()),
                 const SizedBox(height: 16),
                 for (var i = 0; i < _lessons.length; i++) ...[
-                  _lessonCard(_lessons[i], i, _openIdx == i),
+                  FpFadeIn(delay: Duration(milliseconds: 120 + i * 60), child: _lessonCard(_lessons[i], i, _openIdx == i)),
                   const SizedBox(height: 12),
                 ],
               ],

@@ -107,23 +107,45 @@ class _SavingsScreenState extends State<SavingsScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
-            child: RefreshIndicator(
-              color: kGold,
-              onRefresh: _load,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 380),
+              switchInCurve: Curves.easeOut,
+              transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: kGold))
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                      children: [
-                        FpOverline('Трекер накоплений'),
-                        const SizedBox(height: 12),
-                        if (_data!.highDebt) ...[_debtPriorityCard(), const SizedBox(height: 16)],
-                        _goalsSection(),
-                        const SizedBox(height: 16),
-                        _depositsSection(),
-                        const SizedBox(height: 16),
-                        _subsCard(),
-                      ],
+                  ? FpSkeleton(
+                      child: ListView(
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                        children: [
+                          FpBone(width: 150, height: 11),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 180, radius: 24),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 160, radius: 24),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 120, radius: 24),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      color: kGold,
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                        children: [
+                          FpFadeIn(delay: Duration.zero, child: FpOverline('Трекер накоплений')),
+                          const SizedBox(height: 12),
+                          if (_data!.highDebt) ...[
+                            FpFadeIn(delay: const Duration(milliseconds: 60), child: _debtPriorityCard()),
+                            const SizedBox(height: 16),
+                          ],
+                          FpFadeIn(delay: const Duration(milliseconds: 100), child: _goalsSection()),
+                          const SizedBox(height: 16),
+                          FpFadeIn(delay: const Duration(milliseconds: 180), child: _depositsSection()),
+                          const SizedBox(height: 16),
+                          FpFadeIn(delay: const Duration(milliseconds: 260), child: _subsCard()),
+                        ],
+                      ),
                     ),
             ),
           ),

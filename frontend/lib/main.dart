@@ -172,13 +172,33 @@ class _BarItem extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(active ? tab.activeIcon : tab.icon, color: color, size: 22),
+          AnimatedScale(
+            scale: active ? 1.12 : 1.0,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutBack,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Icon(
+                active ? tab.activeIcon : tab.icon,
+                key: ValueKey(active),
+                color: color,
+                size: 22,
+              ),
+            ),
+          ),
           const SizedBox(height: 3),
-          Text(tab.label, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 10, color: color)),
-          if (active) ...[
-            const SizedBox(height: 3),
-            Container(width: 4, height: 4, decoration: const BoxDecoration(color: kGold, shape: BoxShape.circle)),
-          ],
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 10, color: color),
+            child: Text(tab.label),
+          ),
+          const SizedBox(height: 3),
+          AnimatedScale(
+            scale: active ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutBack,
+            child: Container(width: 4, height: 4, decoration: const BoxDecoration(color: kGold, shape: BoxShape.circle)),
+          ),
         ],
       ),
     );
@@ -188,6 +208,46 @@ class _BarItem extends StatelessWidget {
 // ============================================================
 // HomeScreen — Кредитный светофор
 // ============================================================
+
+// ============================================================
+// Home loading skeleton
+// ============================================================
+
+class _HomeLoadingSkeleton extends StatelessWidget {
+  const _HomeLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return FpSkeleton(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                FpBone(width: 130, height: 13),
+                const SizedBox(height: 6),
+                FpBone(width: 90, height: 24),
+              ]),
+            ),
+            const FpBone(width: 40, height: 40, radius: 20),
+          ]),
+          const SizedBox(height: 20),
+          FpBone(width: 140, height: 11),
+          const SizedBox(height: 16),
+          const FpBone(height: 158, radius: 24),
+          const SizedBox(height: 16),
+          const FpBone(height: 220, radius: 24),
+          const SizedBox(height: 16),
+          const FpBone(height: 96, radius: 24),
+          const SizedBox(height: 16),
+          const FpBone(height: 52, radius: 16),
+        ],
+      ),
+    );
+  }
+}
 
 class _TrafficLightData {
   final double pdn;
@@ -303,38 +363,56 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
-            child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kGold))
-                : RefreshIndicator(
-                    color: kGold,
-                    onRefresh: _loadAll,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                      children: [
-                        _topBar(),
-                        const SizedBox(height: 8),
-                        FpOverline('Кредитный светофор'),
-                        const SizedBox(height: 12),
-                        if (_showDailyBanner) ...[_reminderBanner(daily: true), const SizedBox(height: 12)],
-                        if (_showWeeklyBanner) ...[_reminderBanner(daily: false), const SizedBox(height: 12)],
-                        _gaugeCard(),
-                        const SizedBox(height: 16),
-                        _planCard(),
-                        const SizedBox(height: 16),
-                        _petMiniCard(),
-                        const SizedBox(height: 16),
-                        FpButton.secondary(
-                          full: true,
-                          onPressed: _importStatement,
-                          child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            Icon(Icons.upload_file_outlined, size: 18, color: kInk1),
-                            SizedBox(width: 8),
-                            Text('Загрузить новую выписку'),
-                          ]),
+            child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 380),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: child,
+                ),
+                child: _loading
+                    ? const _HomeLoadingSkeleton()
+                    : RefreshIndicator(
+                        color: kGold,
+                        onRefresh: _loadAll,
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                          children: [
+                            FpFadeIn(delay: Duration.zero, child: _topBar()),
+                            const SizedBox(height: 8),
+                            FpFadeIn(delay: const Duration(milliseconds: 60), child: FpOverline('Кредитный светофор')),
+                            const SizedBox(height: 12),
+                            if (_showDailyBanner) ...[
+                              FpFadeIn(delay: const Duration(milliseconds: 80), child: _reminderBanner(daily: true)),
+                              const SizedBox(height: 12),
+                            ],
+                            if (_showWeeklyBanner) ...[
+                              FpFadeIn(delay: const Duration(milliseconds: 80), child: _reminderBanner(daily: false)),
+                              const SizedBox(height: 12),
+                            ],
+                            FpFadeIn(delay: const Duration(milliseconds: 100), child: _gaugeCard()),
+                            const SizedBox(height: 16),
+                            FpFadeIn(delay: const Duration(milliseconds: 180), child: _planCard()),
+                            const SizedBox(height: 16),
+                            FpFadeIn(delay: const Duration(milliseconds: 260), child: _petMiniCard()),
+                            const SizedBox(height: 16),
+                            FpFadeIn(
+                              delay: const Duration(milliseconds: 320),
+                              child: FpButton.secondary(
+                                full: true,
+                                onPressed: _importStatement,
+                                child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                  Icon(Icons.upload_file_outlined, size: 18, color: kInk1),
+                                  SizedBox(width: 8),
+                                  Text('Загрузить новую выписку'),
+                                ]),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+              ),
           ),
         ),
       ),

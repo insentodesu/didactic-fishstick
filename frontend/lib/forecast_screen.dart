@@ -38,23 +38,43 @@ class _ForecastScreenState extends State<ForecastScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
-            child: RefreshIndicator(
-              color: kGold,
-              onRefresh: _load,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 380),
+              switchInCurve: Curves.easeOut,
+              transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: kGold))
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                      children: [
-                        FpOverline('Финансовый прогноз'),
-                        const SizedBox(height: 12),
-                        _pdnDynamicsCard(),
-                        const SizedBox(height: 16),
-                        _monthSummaryCard(),
-                        const SizedBox(height: 16),
-                        _fixedExpensesCard(),
-                        const SizedBox(height: 16),
-                        FpButton.secondary(
+                  ? FpSkeleton(
+                      child: ListView(
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                        children: [
+                          FpBone(width: 150, height: 11),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 200, radius: 24),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 160, radius: 24),
+                          const SizedBox(height: 16),
+                          const FpBone(height: 140, radius: 24),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      color: kGold,
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                        children: [
+                          FpFadeIn(delay: Duration.zero, child: FpOverline('Финансовый прогноз')),
+                          const SizedBox(height: 12),
+                          FpFadeIn(delay: const Duration(milliseconds: 80), child: _pdnDynamicsCard()),
+                          const SizedBox(height: 16),
+                          FpFadeIn(delay: const Duration(milliseconds: 160), child: _monthSummaryCard()),
+                          const SizedBox(height: 16),
+                          FpFadeIn(delay: const Duration(milliseconds: 240), child: _fixedExpensesCard()),
+                          const SizedBox(height: 16),
+                          FpFadeIn(
+                            delay: const Duration(milliseconds: 300),
+                            child: FpButton.secondary(
                           full: true,
                           onPressed: () async {
                             final file = await pickStatementFile();
@@ -76,7 +96,9 @@ class _ForecastScreenState extends State<ForecastScreen> {
                             Text('Загрузить выписку'),
                           ]),
                         ),
-                      ],
+                      ),
+                        ],
+                      ),
                     ),
             ),
           ),
