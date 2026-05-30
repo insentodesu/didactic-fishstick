@@ -9,10 +9,14 @@ from app.services.aiesa_client import chat_complete, chat_complete_stream
 from app.services.deps import get_current_user_id
 from app.services.file_to_text import file_to_text, transactions_to_analysis_text
 
-router = APIRouter(prefix="/llm", tags=["LLM / AI (AIESA)"])
+router = APIRouter(prefix="/llm", tags=["LLM / AI"])
+
+# Публичное название модели. Реальный провайдер скрыт в конфиге.
+BRANDED_MODEL = "finassist-1"
 
 SYSTEM_FINANCIAL = (
-    "Ты — персональный финансовый помощник. Отвечай только на русском языке. "
+    "Ты — ФинАссистент AI, персональный финансовый помощник. "
+    "Отвечай только на русском языке. "
     "Давай конкретные, практичные советы. Не придумывай цифры. "
     "Если вопрос не о финансах — вежливо перенаправь к финансовой теме."
 )
@@ -65,9 +69,9 @@ async def chat(
 
     try:
         answer = await chat_complete(messages)
-        return {"answer": answer, "model": "aiesa-pro"}
+        return {"answer": answer, "model": BRANDED_MODEL}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AIESA недоступна: {e}")
+        raise HTTPException(status_code=503, detail=f"AI-сервис недоступен: {e}")
 
 
 @router.post("/chat/stream")
@@ -124,9 +128,9 @@ async def analyze_file(
 
     try:
         answer = await chat_complete(messages, max_tokens=3000)
-        return {"analysis": answer, "file": file.filename, "model": "aiesa-pro"}
+        return {"analysis": answer, "file": file.filename, "model": BRANDED_MODEL}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AIESA недоступна: {e}")
+        raise HTTPException(status_code=503, detail=f"AI-сервис недоступен: {e}")
 
 
 # ========================= КЛАССИФИКАЦИЯ =========================
@@ -143,7 +147,7 @@ async def classify_transaction(body: ClassifyRequest):
         )},
     ]
     try:
-        answer = await chat_complete(messages, model="aiesa-mini", temperature=0.1, max_tokens=10)
+        answer = await chat_complete(messages, model=None, temperature=0.1, max_tokens=10)
         cat_id = int(answer.strip().split()[0])
         if cat_id not in CATEGORY_MAP:
             cat_id = 13
@@ -177,7 +181,7 @@ async def classify_batch(body: ClassifyBatchRequest):
     ]
 
     try:
-        answer = await chat_complete(messages, model="aiesa-mini", temperature=0.1, max_tokens=500)
+        answer = await chat_complete(messages, model=None, temperature=0.1, max_tokens=500)
         # Вытаскиваем JSON из ответа
         start = answer.find("{")
         end = answer.rfind("}") + 1
@@ -224,9 +228,9 @@ async def analyze_finances(
     ]
     try:
         answer = await chat_complete(messages)
-        return {"analysis": answer, "model": "aiesa-pro"}
+        return {"analysis": answer, "model": BRANDED_MODEL}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AIESA недоступна: {e}")
+        raise HTTPException(status_code=503, detail=f"AI-сервис недоступен: {e}")
 
 
 @router.post("/analyze/transactions")
@@ -245,9 +249,9 @@ async def analyze_transactions_list(
     ]
     try:
         answer = await chat_complete(messages)
-        return {"summary": answer, "model": "aiesa-pro"}
+        return {"summary": answer, "model": BRANDED_MODEL}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AIESA недоступна: {e}")
+        raise HTTPException(status_code=503, detail=f"AI-сервис недоступен: {e}")
 
 
 @router.post("/summarize")
@@ -265,7 +269,7 @@ async def summarize_transactions(
         answer = await chat_complete(messages, max_tokens=300)
         return {"summary": answer}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"AIESA недоступна: {e}")
+        raise HTTPException(status_code=503, detail=f"AI-сервис недоступен: {e}")
 
 
 @router.get("/insights")
