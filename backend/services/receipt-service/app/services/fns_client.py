@@ -161,6 +161,120 @@ async def fetch_receipt_from_fns(
 
 
 # ============================================================
+# Запрос к lkdr.nalog.ru (официальный кабинет ФНС, Bearer-токен)
+# ============================================================
+
+_LKDR_BASE = "https://lkdr.nalog.ru"
+
+
+async def fetch_receipt_lkdr(fn: str, fd: str, fp: str) -> dict | None:
+    """
+    Получает полную детализацию чека через lkdr.nalog.ru.
+
+    Алгоритм:
+      1. POST /api/v1/receipt {fn, fd} → список чеков, берём key
+      2. POST /api/v1/receipt/fiscal_data {key} → полные данные с позициями
+
+    Требует переменную окружения NALOG_LKDR_TOKEN (Bearer JWT из lkdr.nalog.ru).
+    Получить: открыть lkdr.nalog.ru → DevTools → любой /api запрос → заголовок Authorization.
+    Токен действует ~1 час, обновляется автоматически при новом логине.
+    """
+    token = settings.nalog_lkdr_token
+    if not token:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Шаг 1: найти чек по fn+fd
+            r1 = await client.post(
+                f"{_LKDR_BASE}/api/v1/receipt",
+                json={"fiscalDriveNumber": fn, "fiscalDocumentNumber": fd},
+                headers=headers,
+            )
+            if r1.status_code != 200:
+                return None
+
+            receipts = r1.json().get("receipts", [])
+            if not receipts:
+                return None
+
+            # Берём первый совпавший чек (fn+fd должны совпасть)
+            key = None
+            for r in receipts:
+                if str(r.get("fiscalDriveNumber")) == fn and str(r.get("fiscalDocumentNumber")) == fd:
+                    key = r.get("key")
+                    break
+            if not key:
+                key = receipts[0].get("key")
+            if not key:
+                return None
+
+            # Шаг 2: полная детализация по key
+            r2 = await client.post(
+                f"{_LKDR_BASE}/api/v1/receipt/fiscal_data",
+                json={"key": key},
+                headers=headers,
+            )
+            if r2.status_code != 200:
+                return None
+
+            data = r2.json()
+            return _parse_lkdr_receipt(data, fn, fd, fp)
+
+    except Exception:
+        return None
+
+
+def _parse_lkdr_receipt(data: dict, fn: str, fd: str, fp: str) -> dict:
+    """Нормализует ответ lkdr.nalog.ru в общий формат. Суммы уже в рублях."""
+    items = [
+        {
+            "name": item.get("name", ""),
+            "price": float(item.get("price", 0)),
+            "quantity": float(item.get("quantity", 1)),
+            "sum": float(item.get("sum", 0)),
+            "nds_type": item.get("nds"),
+        }
+        for item in data.get("items", [])
+    ]
+
+    raw_date = data.get("dateTime")
+    purchase_date = None
+    if raw_date:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y%m%dT%H%M%S", "%Y%m%dT%H%M"):
+            try:
+                purchase_date = datetime.strptime(str(raw_date), fmt).isoformat()
+                break
+            except (ValueError, TypeError):
+                continue
+
+    return {
+        "seller_name": data.get("user", ""),
+        "seller_inn": (data.get("userInn") or "").strip(),
+        "seller_address": data.get("retailPlaceAddress") or data.get("retailPlace", ""),
+        "cashier": data.get("operator"),
+        "kkt_reg_number": (data.get("kktRegId") or "").strip(),
+        "total_amount": float(data.get("totalSum", 0)),
+        "cash_amount": float(data.get("cashTotalSum", 0)),
+        "card_amount": float(data.get("ecashTotalSum", 0)),
+        "nds_total": 0.0,
+        "purchase_date": purchase_date,
+        "fiscal_drive_number": str(data.get("fiscalDriveNumber") or fn),
+        "fiscal_document_number": str(data.get("fiscalDocumentNumber") or fd),
+        "fiscal_sign": str(data.get("fiscalSign") or fp),
+        "items": items,
+        "items_count": len(items),
+        "source": "lkdr.nalog.ru",
+    }
+
+
+# ============================================================
 # Запрос к nalog.ru FNS mobile API
 # ============================================================
 
@@ -338,7 +452,11 @@ async def get_receipt_data(qr_raw: str) -> dict:
     # Попытка 1: proverkacheka.com
     details = await fetch_receipt_from_fns(fn=fn, fd=fd, fp=fp, amount=amount, date=date, operation_type=op)
 
-    # Попытка 2: nalog.ru (если первая не удалась)
+    # Попытка 2: lkdr.nalog.ru (NALOG_LKDR_TOKEN)
+    if details is None:
+        details = await fetch_receipt_lkdr(fn=fn, fd=fd, fp=fp)
+
+    # Попытка 3: nalog.ru mobile API (NALOG_SESSION_ID)
     if details is None:
         details = await fetch_receipt_nalog_ru(fn=fn, fd=fd, fp=fp, date=date, amount=amount)
 
