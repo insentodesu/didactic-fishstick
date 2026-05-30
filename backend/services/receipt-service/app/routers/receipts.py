@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.services.deps import get_current_user_id
-from app.services.fns_client import fetch_receipt_from_fns, parse_qr_string
+from app.services.fns_client import get_receipt_data
 
 router = APIRouter(prefix="/receipts", tags=["Чеки"])
 
@@ -24,13 +24,25 @@ async def scan_qr(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    """Расшифровывает QR-код кассового чека через ФНС API."""
-    parsed = parse_qr_string(body.qr_raw)
-    fn, fd, fp = parsed.get("fn"), parsed.get("fd"), parsed.get("fp")
-    if not all([fn, fd, fp]):
-        raise HTTPException(status_code=400, detail="Некорректный QR-код чека")
+    """
+    Расшифровывает QR-код кассового чека.
 
-    receipt_data = await fetch_receipt_from_fns(fn, fd, fp)
+    Алгоритм:
+      1. Парсим параметры из QR-строки (fn, fd, fp, сумма, дата)
+      2. Валидируем формат параметров локально
+      3. Запрашиваем полную детализацию через proverkacheka.com API
+      4. Сохраняем результат в БД
+
+    Без API ключа (FNS_CLIENT_SECRET) возвращает данные из QR без списка позиций.
+    Ключ: зарегистрироваться на proverkacheka.com → Личный кабинет → API.
+    """
+    result = await get_receipt_data(body.qr_raw)
+
+    if not result["valid"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    parsed = result["parsed"]
+    details = result["details"]
 
     receipt_id = str(uuid.uuid4())
     await db.execute(text("""
@@ -39,19 +51,30 @@ async def scan_qr(
              seller_address, items, raw_fns_response, status)
         VALUES (:id, :uid, :qr, :fn, :fd, :fp, :amount, :seller, :inn, :addr, :items, :raw, :status)
     """), {
-        "id": receipt_id, "uid": user_id, "qr": body.qr_raw,
-        "fn": fn, "fd": fd, "fp": fp,
-        "amount": receipt_data["total_amount"] if receipt_data else parsed.get("sum"),
-        "seller": receipt_data["seller_name"] if receipt_data else None,
-        "inn": receipt_data["seller_inn"] if receipt_data else None,
-        "addr": receipt_data["seller_address"] if receipt_data else None,
-        "items": json.dumps(receipt_data["items"], ensure_ascii=False) if receipt_data else None,
-        "raw": json.dumps(receipt_data, ensure_ascii=False) if receipt_data else None,
-        "status": "processed" if receipt_data else "error",
+        "id": receipt_id,
+        "uid": user_id,
+        "qr": body.qr_raw,
+        "fn": parsed.get("fn"),
+        "fd": parsed.get("fd"),
+        "fp": parsed.get("fp"),
+        "amount": details["total_amount"] if details else parsed.get("amount"),
+        "seller": details["seller_name"] if details else None,
+        "inn": details["seller_inn"] if details else None,
+        "addr": details["seller_address"] if details else None,
+        "items": json.dumps(details["items"], ensure_ascii=False) if details else None,
+        "raw": json.dumps(details, ensure_ascii=False) if details else None,
+        "status": "processed" if details else "partial",
     })
     await db.commit()
 
-    return {"receipt_id": receipt_id, "data": receipt_data or {"error": "ФНС не вернул данные"}}
+    return {
+        "receipt_id": receipt_id,
+        "valid": result["valid"],
+        "has_details": result["has_details"],
+        "parsed": parsed,
+        "details": details,
+        "warning": result["error"] if not result["has_details"] else None,
+    }
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
