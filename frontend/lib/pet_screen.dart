@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart' as api;
 import 'ds.dart';
@@ -15,6 +16,7 @@ class _PetScreenState extends State<PetScreen> {
   bool _loading = true;
   int _petIdx = 0;
   int _envIdx = 0;
+  String _customPetName = '';
 
   static const _petEmojis = ['🐶', '🐱', '🦊', '🐼'];
   static const _envNames = ['Уют', 'Луг', 'Небо'];
@@ -31,12 +33,116 @@ class _PetScreenState extends State<PetScreen> {
   }
 
   Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmojiIdx = prefs.getInt('pet_emoji_idx') ?? 0;
+    final savedName = prefs.getString('pet_name') ?? '';
     try {
       final j = await api.getTamagochi();
-      if (mounted) setState(() { _data = _PetData.fromJson(j); _loading = false; });
+      if (mounted) setState(() {
+        _data = _PetData.fromJson(j);
+        _loading = false;
+        _petIdx = savedEmojiIdx;
+        _customPetName = savedName;
+      });
     } catch (_) {
-      if (mounted) setState(() { _data = _PetData.demo(); _loading = false; });
+      if (mounted) setState(() {
+        _data = _PetData.demo();
+        _loading = false;
+        _petIdx = savedEmojiIdx;
+        _customPetName = savedName;
+      });
     }
+  }
+
+  Future<void> _savePetPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('pet_emoji_idx', _petIdx);
+    await prefs.setString('pet_name', _customPetName);
+  }
+
+  Future<void> _showEditNameSheet() async {
+    final ctrl = TextEditingController(text: _customPetName);
+    int tmpIdx = _petIdx;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheetState) {
+          final bottom = MediaQuery.of(ctx).viewInsets.bottom;
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Container(
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 28 + bottom),
+                decoration: const BoxDecoration(color: kSurface, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('Имя питомца', style: dsH3()),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(ctx),
+                        child: Container(width: 34, height: 34, decoration: const BoxDecoration(color: kCream, shape: BoxShape.circle), child: const Icon(Icons.close, size: 18, color: kInk1)),
+                      ),
+                    ]),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: List.generate(_petEmojis.length, (i) {
+                        final on = i == tmpIdx;
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => setSheetState(() => tmpIdx = i),
+                            child: Container(
+                              margin: EdgeInsets.only(right: i < _petEmojis.length - 1 ? 8 : 0),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: on ? kGoldTint : kSurface,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: on ? kGold : kLine, width: 1.5),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(_petEmojis[i], style: const TextStyle(fontSize: 26)),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: ctrl,
+                      textCapitalization: TextCapitalization.words,
+                      style: dsH3(),
+                      decoration: InputDecoration(
+                        hintText: 'Имя питомца',
+                        hintStyle: TextStyle(fontFamily: kFontDisplay, color: kInk3, fontSize: 21),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kLine, width: 2)),
+                        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: kGold, width: 2)),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FpButton.gold(
+                      full: true,
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        setState(() {
+                          _petIdx = tmpIdx;
+                          _customPetName = ctrl.text.trim();
+                        });
+                        _savePetPrefs();
+                      },
+                      child: const Text('Сохранить'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        });
+      },
+    );
+    ctrl.dispose();
   }
 
   Future<void> _dailyCheckin() async {
@@ -145,7 +251,17 @@ class _PetScreenState extends State<PetScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text(d.name, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 26, color: kInk1)),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Text(_petEmojis[_petIdx], style: const TextStyle(fontSize: 32)),
+                    const SizedBox(width: 8),
+                    Text(_customPetName.isNotEmpty ? _customPetName : d.name,
+                        style: const TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 26, color: kInk1)),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: _showEditNameSheet,
+                      child: const Icon(Icons.edit_outlined, size: 18, color: kInk3),
+                    ),
+                  ]),
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                     FpChip(child: Row(children: [const Text('⭐', style: TextStyle(fontSize: 13)), const SizedBox(width: 4), Text('Уровень ${d.level}')]), bg: Colors.white.withValues(alpha: 0.7)),
@@ -220,7 +336,7 @@ class _PetScreenState extends State<PetScreen> {
               final on = i == _petIdx;
               return Expanded(
                 child: GestureDetector(
-                  onTap: () => setState(() => _petIdx = i),
+                  onTap: () { setState(() => _petIdx = i); _savePetPrefs(); },
                   child: Container(
                     margin: EdgeInsets.only(right: i < _petEmojis.length - 1 ? 8 : 0),
                     padding: const EdgeInsets.all(12),

@@ -413,3 +413,51 @@ class Tx {
   final double amount;
   const Tx(this.id, this.name, this.cat, this.amount, this.date);
 }
+
+// ---------------------------------------------------------------------------
+// История транзакций
+// ---------------------------------------------------------------------------
+
+Future<List<TxItem>> getTransactions({int pageSize = 10}) async {
+  await loadToken();
+  final uri = _uri('/transactions/').replace(queryParameters: {'page_size': pageSize.toString()});
+  final resp = await http.get(uri, headers: _headers());
+  if (resp.statusCode >= 200 && resp.statusCode < 300) {
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    final items = (data is Map ? (data['items'] ?? data['transactions'] ?? []) : data) as List;
+    return items.map<TxItem>((j) => TxItem.fromJson(j as Map<String, dynamic>)).toList();
+  }
+  throw ApiException(statusCode: resp.statusCode, detail: utf8.decode(resp.bodyBytes));
+}
+
+class TxItem {
+  final String id;
+  final double amount;
+  final bool isIncome;
+  final String? merchantName;
+  final String? description;
+  final String transactionDate;
+  final String? category;
+
+  const TxItem({
+    required this.id,
+    required this.amount,
+    required this.isIncome,
+    this.merchantName,
+    this.description,
+    required this.transactionDate,
+    this.category,
+  });
+
+  factory TxItem.fromJson(Map<String, dynamic> j) => TxItem(
+    id: j['id']?.toString() ?? '',
+    amount: (j['amount'] as num?)?.toDouble() ?? 0,
+    isIncome: j['is_income'] as bool? ?? false,
+    merchantName: j['merchant_name'] as String?,
+    description: j['description'] as String?,
+    transactionDate: j['transaction_date']?.toString() ?? '',
+    category: j['category'] as String?,
+  );
+
+  String get displayName => merchantName?.isNotEmpty == true ? merchantName! : (description?.isNotEmpty == true ? description! : 'Операция');
+}

@@ -92,8 +92,10 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with SingleTickerProviderStateMixin {
   int _tab = 0;
+  bool _switching = false;
+  late final AnimationController _tabAnim;
 
   static const _tabs = [
     _TabItem(Icons.speed_outlined, Icons.speed, 'Светофор'),
@@ -104,20 +106,45 @@ class _MainShellState extends State<MainShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _tabAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 180), value: 1.0);
+  }
+
+  @override
+  void dispose() {
+    _tabAnim.dispose();
+    super.dispose();
+  }
+
+  Future<void> _switchTab(int i) async {
+    if (i == _tab || _switching) return;
+    _switching = true;
+    await _tabAnim.reverse();
+    if (!mounted) { _switching = false; return; }
+    setState(() => _tab = i);
+    await _tabAnim.forward();
+    _switching = false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kCream,
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          HomeScreen(onSwitchTab: (i) => setState(() => _tab = i)),
-          const ForecastScreen(),
-          PetScreen(onLesson: () => setState(() => _tab = 4)),
-          const SavingsScreen(),
-          const LessonsScreen(),
-        ],
+      body: FadeTransition(
+        opacity: _tabAnim,
+        child: IndexedStack(
+          index: _tab,
+          children: [
+            HomeScreen(onSwitchTab: _switchTab),
+            const ForecastScreen(),
+            PetScreen(onLesson: () => _switchTab(4)),
+            const SavingsScreen(),
+            const LessonsScreen(),
+          ],
+        ),
       ),
-      bottomNavigationBar: _BottomBar(current: _tab, tabs: _tabs, onTap: (i) => setState(() => _tab = i)),
+      bottomNavigationBar: _BottomBar(current: _tab, tabs: _tabs, onTap: _switchTab),
     );
   }
 }
@@ -318,6 +345,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _userName = '';
   bool _showDailyBanner = false;
   bool _showWeeklyBanner = false;
+  List<api.TxItem> _transactions = [];
+  bool _txLoading = true;
 
   @override
   void initState() {
@@ -336,7 +365,28 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       if (mounted) setState(() { _data = _TrafficLightData.demo(); _loading = false; _showDailyBanner = daily; _showWeeklyBanner = weekly; });
     }
+    _loadTransactions();
   }
+
+  Future<void> _loadTransactions() async {
+    try {
+      final txs = await api.getTransactions(pageSize: 8);
+      if (mounted) setState(() { _transactions = txs; _txLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() {
+        _transactions = _demoTransactions();
+        _txLoading = false;
+      });
+    }
+  }
+
+  List<api.TxItem> _demoTransactions() => [
+    api.TxItem(id: '1', amount: 3200, isIncome: false, merchantName: 'ВкусВилл', transactionDate: '2026-05-30', category: 'Еда'),
+    api.TxItem(id: '2', amount: 92000, isIncome: true, merchantName: 'Зарплата', transactionDate: '2026-05-25', category: 'Доход'),
+    api.TxItem(id: '3', amount: 1890, isIncome: false, merchantName: 'Netflix', transactionDate: '2026-05-24', category: 'Подписки'),
+    api.TxItem(id: '4', amount: 450, isIncome: false, merchantName: 'Метро', transactionDate: '2026-05-23', category: 'Транспорт'),
+    api.TxItem(id: '5', amount: 8700, isIncome: false, merchantName: 'H&M', transactionDate: '2026-05-21', category: 'Покупки'),
+  ];
 
   Future<void> _importStatement() async {
     try {
@@ -398,7 +448,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             FpFadeIn(delay: const Duration(milliseconds: 260), child: _petMiniCard()),
                             const SizedBox(height: 16),
                             FpFadeIn(
-                              delay: const Duration(milliseconds: 320),
+                              delay: const Duration(milliseconds: 300),
+                              child: _txHistoryCard(),
+                            ),
+                            const SizedBox(height: 16),
+                            FpFadeIn(
+                              delay: const Duration(milliseconds: 360),
                               child: FpButton.secondary(
                                 full: true,
                                 onPressed: _importStatement,
@@ -593,6 +648,57 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _txHistoryCard() {
+    final catEmoji = {'Еда': '🍕', 'Транспорт': '🚇', 'Покупки': '🛍️', 'Развлечения': '🎬', 'Здоровье': '💊', 'ЖКУ': '🏠', 'Подписки': '📱', 'Доход': '💰', 'Прочее': '📦'};
+    return FpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            FpOverline('История операций'),
+            if (_txLoading) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: kGold)),
+          ]),
+          const SizedBox(height: 12),
+          if (_txLoading)
+            const SizedBox(height: 48)
+          else if (_transactions.isEmpty)
+            Text('Нет операций. Загрузи выписку или добавь вручную.', style: dsSmall(color: kInk2))
+          else
+            for (var i = 0; i < _transactions.length; i++) ...[
+              if (i > 0) Divider(color: kLine, height: 1),
+              _txRow(_transactions[i], catEmoji),
+            ],
+        ],
+      ),
+    );
+  }
+
+  Widget _txRow(api.TxItem tx, Map<String, String> catEmoji) {
+    final isIncome = tx.isIncome;
+    final amtColor = isIncome ? kGreen : kInk1;
+    final sign = isIncome ? '+' : '−';
+    final emoji = catEmoji[tx.category] ?? '📦';
+    final dateParts = tx.transactionDate.split('-');
+    final dateStr = dateParts.length == 3 ? '${dateParts[2]}.${dateParts[1]}' : tx.transactionDate;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(children: [
+        Container(
+          width: 38, height: 38,
+          decoration: BoxDecoration(color: kCream, borderRadius: BorderRadius.circular(12)),
+          alignment: Alignment.center,
+          child: Text(emoji, style: const TextStyle(fontSize: 18)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tx.displayName, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(dateStr, style: dsCaption(color: kInk3).copyWith(fontSize: 12)),
+        ])),
+        Text('$sign${fmtRub(tx.amount)}', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: amtColor)),
+      ]),
+    );
+  }
+
   Widget _reminderBanner({required bool daily}) {
     final color = daily ? kRed : const Color(0xFF1565C0);
     final bg = daily ? kRedBg : const Color(0xFFE3F2FD);
@@ -677,14 +783,119 @@ class _AddTxSheetState extends State<_AddTxSheet> {
     if (qr == null || !mounted) return;
     try {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка чека…'), behavior: SnackBarBehavior.floating));
-      await uploadReceiptQr(qr);
+      final result = await uploadReceiptQr(qr);
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Чек отправлен. Расход добавится после обработки.'), behavior: SnackBarBehavior.floating));
-    } catch (_) {
+      await _showReceiptModal(result);
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось отправить чек.'), behavior: SnackBarBehavior.floating));
     }
+  }
+
+  Future<void> _showReceiptModal(Map<String, dynamic> result) async {
+    final parsed = result['parsed'] as Map<String, dynamic>? ?? {};
+    final details = result['details'] as Map<String, dynamic>?;
+    final hasDetails = result['has_details'] as bool? ?? false;
+    final sellerName = details?['seller_name'] as String? ?? 'Магазин не определён';
+    final totalAmount = hasDetails
+        ? (details?['total_amount'] as num?)?.toDouble()
+        : (parsed['amount'] as num?)?.toDouble();
+    final purchaseDate = details?['purchase_date'] as String? ?? parsed['t']?.toString() ?? '';
+    final items = (details?['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+              decoration: const BoxDecoration(color: kSurface, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Чек', style: dsH3()),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(ctx),
+                      child: Container(width: 34, height: 34, decoration: const BoxDecoration(color: kCream, shape: BoxShape.circle), child: const Icon(Icons.close, size: 18, color: kInk1)),
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: kGoldTint, borderRadius: BorderRadius.circular(18)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(sellerName, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 16, color: kInk1)),
+                      if (purchaseDate.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(purchaseDate, style: dsCaption(color: kInk2).copyWith(fontSize: 13)),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        totalAmount != null ? fmtRub(totalAmount) : '—',
+                        style: dsMetric(size: 32, color: kInk1),
+                      ),
+                      Text('итого', style: dsOverline(color: kInk3)),
+                    ]),
+                  ),
+                  if (!hasDetails) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: kYellowBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: kYellowRing)),
+                      child: Row(children: [
+                        const Icon(Icons.info_outline, size: 16, color: kYellow),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text('Детализация недоступна — данные из QR', style: dsCaption(color: kInk2).copyWith(fontSize: 13))),
+                      ]),
+                    ),
+                  ],
+                  if (items.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    FpOverline('Позиции'),
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 260),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => Divider(color: kLine, height: 1),
+                        itemBuilder: (_, i) {
+                          final it = items[i];
+                          final name = it['name']?.toString() ?? 'Товар';
+                          final qty = (it['quantity'] as num?)?.toDouble() ?? 1;
+                          final price = (it['price'] as num?)?.toDouble() ?? 0;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(children: [
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(name, style: TextStyle(fontFamily: kFontText, fontSize: 14, color: kInk1), maxLines: 2, overflow: TextOverflow.ellipsis),
+                                Text('${qty % 1 == 0 ? qty.toInt() : qty} шт.', style: dsCaption(color: kInk3).copyWith(fontSize: 12)),
+                              ])),
+                              const SizedBox(width: 8),
+                              Text(fmtRub(price * qty), style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1)),
+                            ]),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  FpButton.gold(full: true, onPressed: () => Navigator.pop(ctx), child: const Text('Готово')),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -832,8 +1043,12 @@ class _NotificationSettingsSheetState extends State<_NotificationSettingsSheet> 
   void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
-    final s = await NotificationService.loadSettings();
-    setState(() { _s = s; _granted = NotificationService.isGranted; _loading = false; });
+    try {
+      final s = await NotificationService.loadSettings();
+      if (mounted) setState(() { _s = s; _granted = NotificationService.isGranted; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; });
+    }
   }
 
   @override
@@ -926,6 +1141,8 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
   final _nameCtrl = TextEditingController();
   final _incomeCtrl = TextEditingController();
   final _debtCtrl = TextEditingController();
+  final _petNameCtrl = TextEditingController();
+  int _petEmojiIdx = 0;
   bool _hasCredits = false;
   final _goals = <String>{};
   bool _loading = false;
@@ -936,13 +1153,18 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
     ('awareness', '📊', 'Разобраться куда уходят деньги'),
   ];
 
+  static const _petEmojis = ['🐶', '🐱', '🦊', '🐼'];
+
   @override
-  void dispose() { _nameCtrl.dispose(); _incomeCtrl.dispose(); _debtCtrl.dispose(); super.dispose(); }
+  void dispose() { _nameCtrl.dispose(); _incomeCtrl.dispose(); _debtCtrl.dispose(); _petNameCtrl.dispose(); super.dispose(); }
 
   Future<void> _finish() async {
     setState(() => _loading = true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_name', _nameCtrl.text.trim());
+    final petName = _petNameCtrl.text.trim();
+    if (petName.isNotEmpty) await prefs.setString('pet_name', petName);
+    await prefs.setInt('pet_emoji_idx', _petEmojiIdx);
     final income = double.tryParse(_incomeCtrl.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0;
     final debt = double.tryParse(_debtCtrl.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0;
     try {
@@ -987,6 +1209,7 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
       case 2: return _stepIncome();
       case 3: return _stepCredits();
       case 4: return _stepGoals();
+      case 5: return _stepPetName();
       default: return _stepWelcome();
     }
   }
@@ -1164,6 +1387,59 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
       const Spacer(),
       Row(children: [
         FpButton.ghost(onPressed: () => setState(() => _step = 3), child: const Text('Назад')),
+        const SizedBox(width: 12),
+        Expanded(child: FpButton.gold(onPressed: () => setState(() => _step = 5), child: const Text('Далее'))),
+      ]),
+    ],
+  );
+
+  Widget _stepPetName() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Spacer(),
+      FpOverline('Питомец'),
+      const SizedBox(height: 12),
+      Text('Выбери питомца\nи дай ему имя', style: dsH2()),
+      const SizedBox(height: 8),
+      Text('Питомец растёт вместе с твоими финансами', style: dsSmall(color: kInk2)),
+      const SizedBox(height: 24),
+      Row(
+        children: List.generate(_petEmojis.length, (i) {
+          final on = i == _petEmojiIdx;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _petEmojiIdx = i),
+              child: Container(
+                margin: EdgeInsets.only(right: i < _petEmojis.length - 1 ? 10 : 0),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: on ? kGoldTint : kSurface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: on ? kGold : kLine, width: 1.5),
+                  boxShadow: on ? shadowGold() : shadowMd(),
+                ),
+                alignment: Alignment.center,
+                child: Text(_petEmojis[i], style: const TextStyle(fontSize: 34)),
+              ),
+            ),
+          );
+        }),
+      ),
+      const SizedBox(height: 24),
+      TextField(
+        controller: _petNameCtrl,
+        textCapitalization: TextCapitalization.words,
+        style: dsH3(),
+        decoration: InputDecoration(
+          hintText: 'Имя питомца (необязательно)',
+          hintStyle: TextStyle(fontFamily: kFontDisplay, color: kInk3, fontSize: 20),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: kLine, width: 2)),
+          focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: kGold, width: 2)),
+        ),
+      ),
+      const Spacer(),
+      Row(children: [
+        FpButton.ghost(onPressed: () => setState(() => _step = 4), child: const Text('Назад')),
         const SizedBox(width: 12),
         Expanded(child: FpButton.gold(onPressed: _finish, child: const Text('Построить план'))),
       ]),

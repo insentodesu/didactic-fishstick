@@ -49,7 +49,13 @@ class _SavingsScreenState extends State<SavingsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Новая цель', style: dsH3()),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Новая цель', style: dsH3()),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(ctx),
+                      child: Container(width: 34, height: 34, decoration: const BoxDecoration(color: kCream, shape: BoxShape.circle), child: const Icon(Icons.close, size: 18, color: kInk1)),
+                    ),
+                  ]),
                   const SizedBox(height: 16),
                   TextField(
                     controller: ctrl,
