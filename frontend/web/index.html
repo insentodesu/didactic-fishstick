@@ -46,26 +46,49 @@
   <script>
     window._qrScanners = {};
 
-    // Вызывается синхронно из жеста (onTap в Dart) — контейнер уже в DOM.
-    // getUserMedia вызывается в контексте пользовательского жеста — Safari OK.
     window.initQrScanner = function(containerId, onResult, onError) {
       var container = document.getElementById(containerId);
       if (!container) {
-        if (onError) onError('Camera container not found in DOM');
+        setTimeout(function() { window.initQrScanner(containerId, onResult, onError); }, 100);
         return;
       }
+
+      container.style.cssText += 'position:relative;background:#000;display:flex;align-items:center;justify-content:center;';
 
       var video = document.createElement('video');
       video.setAttribute('playsinline', 'true');
       video.setAttribute('autoplay', 'true');
       video.setAttribute('muted', 'true');
-      video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;';
 
       var canvas = document.createElement('canvas');
       canvas.style.display = 'none';
 
+      // Рамка прицела (показывается после старта камеры)
+      var aimBox = document.createElement('div');
+      aimBox.style.cssText = 'position:absolute;width:220px;height:220px;border:3px solid white;border-radius:18px;pointer-events:none;display:none;z-index:5;top:50%;left:50%;transform:translate(-50%,-60%);';
+
+      // Подсказка снизу
+      var hint = document.createElement('div');
+      hint.style.cssText = 'position:absolute;bottom:60px;left:24px;right:24px;background:rgba(0,0,0,0.65);border-radius:12px;padding:14px;text-align:center;z-index:5;';
+      hint.innerHTML = '<span style="color:white;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;line-height:1.4;">Наведите камеру на QR-код в нижней части чека.</span>';
+      hint.style.display = 'none';
+
+      // Кнопка "Включить камеру" — HTML-элемент, рендерится ПОВЕРХ Flutter canvas
+      var btn = document.createElement('div');
+      btn.style.cssText = 'position:relative;z-index:10;text-align:center;cursor:pointer;padding:24px 32px;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;';
+      btn.innerHTML =
+        '<div style="width:80px;height:80px;background:rgba(255,255,255,0.12);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;border:2px solid rgba(255,255,255,0.25);">' +
+          '<svg width="36" height="36" viewBox="0 0 24 24" fill="white"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/><path d="M9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>' +
+        '</div>' +
+        '<div style="color:white;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:17px;font-weight:600;margin-bottom:10px;">Включить камеру</div>' +
+        '<div style="color:rgba(255,255,255,0.55);font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;line-height:1.5;max-width:240px;margin:0 auto;">Браузер запросит разрешение на доступ к камере</div>';
+
       container.appendChild(video);
       container.appendChild(canvas);
+      container.appendChild(aimBox);
+      container.appendChild(hint);
+      container.appendChild(btn);
 
       var ctx = canvas.getContext('2d');
       var active = true;
@@ -73,17 +96,31 @@
 
       window._qrScanners[containerId] = { stop: function() { active = false; }, stream: null };
 
-      // Вызов getUserMedia здесь — синхронно из tap-обработчика Dart.
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
-        .then(function(stream) {
-          if (!active) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
-          window._qrScanners[containerId].stream = stream;
-          video.srcObject = stream;
-          requestAnimationFrame(scan);
-        })
-        .catch(function(err) {
-          if (onError) onError(String(err));
-        });
+      function startCamera() {
+        btn.style.display = 'none';
+        navigator.mediaDevices
+          .getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
+          .then(function(stream) {
+            if (!active) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+            window._qrScanners[containerId].stream = stream;
+            video.srcObject = stream;
+            video.style.display = 'block';
+            aimBox.style.display = 'block';
+            hint.style.display = 'block';
+            requestAnimationFrame(scan);
+          })
+          .catch(function(err) {
+            btn.innerHTML =
+              '<div style="color:rgba(255,255,255,0.4);font-size:40px;margin-bottom:12px;">🚫</div>' +
+              '<div style="color:white;font-family:-apple-system,sans-serif;font-size:15px;font-weight:600;margin-bottom:8px;">Нет доступа к камере</div>' +
+              '<div style="color:rgba(255,255,255,0.5);font-family:-apple-system,sans-serif;font-size:12px;">' + String(err) + '</div>';
+            btn.style.display = 'block';
+            if (onError) onError(String(err));
+          });
+      }
+
+      btn.addEventListener('click', startCamera);
+      btn.addEventListener('touchend', function(e) { e.preventDefault(); startCamera(); });
 
       function scan() {
         if (!active || found) return;
@@ -93,9 +130,7 @@
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           if (typeof jsQR !== 'undefined') {
-            var code = jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: 'dontInvert',
-            });
+            var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
             if (code && code.data) {
               found = true;
               active = false;
