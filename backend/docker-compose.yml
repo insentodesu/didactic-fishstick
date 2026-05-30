@@ -158,6 +158,31 @@ services:
       - "traefik.http.routers.auth.priority=10"
       - "traefik.http.services.auth.loadbalancer.server.port=8001"
 
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: finassist-analytics
+    <<: *service-defaults
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 200m
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
+      - "traefik.http.routers.analytics.middlewares=strip-api"
+      - "traefik.http.routers.analytics.priority=10"
+      - "traefik.http.services.analytics.loadbalancer.server.port=8003"
+
   transaction-service:
     build:
       context: ./services/transaction-service

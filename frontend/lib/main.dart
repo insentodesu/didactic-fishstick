@@ -360,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final daily = await NotificationService.needsDailyReminder();
     final weekly = await NotificationService.needsWeeklyReminder();
     try {
-      final j = await api.getTrafficLight(demo: true);
+      final j = await api.getTrafficLight();
       if (mounted) setState(() { _data = _TrafficLightData.fromJson(j); _loading = false; _showDailyBanner = daily; _showWeeklyBanner = weekly; });
     } catch (_) {
       if (mounted) setState(() { _data = _TrafficLightData.demo(); _loading = false; _showDailyBanner = daily; _showWeeklyBanner = weekly; });

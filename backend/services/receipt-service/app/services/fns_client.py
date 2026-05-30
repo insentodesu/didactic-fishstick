@@ -12,14 +12,16 @@ QR-код фискального чека содержит строку вида
   fp — фискальный признак (подпись)
   n  — признак расчёта (1 = приход, 2 = возврат и тд)
 
-Провайдер: proverkacheka.com — агрегатор ФНС данных.
-  API ключ: зарегистрироваться на proverkacheka.com → Личный кабинет → API
-  Стоимость: ~1.5₽ за детальный запрос (есть пробный период).
-
-Режим без ключа: возвращает данные, разобранные из QR-кода (без списка позиций).
+Провайдеры:
+  1. proverkacheka.com — платный агрегатор ФНС (~1.5₽/запрос, есть пробный период)
+  2. nalog.ru FNS mobile API — бесплатный, требует sessionId
+     Получить sessionId: https://lkfl2.nalog.ru или через приложение «Проверка чека ФНС»
+     Установите переменную окружения NALOG_SESSION_ID
 """
 
+import os
 import re
+import uuid
 from datetime import datetime
 
 import httpx
@@ -104,8 +106,6 @@ async def fetch_receipt_from_fns(
     """
     Получает полную детализацию чека через proverkacheka.com API.
     Возвращает None если API недоступен или ключ не задан.
-
-    Документация: https://proverkacheka.com (раздел API в личном кабинете)
     """
     if not settings.fns_client_secret:
         return None
@@ -140,11 +140,9 @@ async def fetch_receipt_from_fns(
     except Exception:
         return None
 
-    # Проверяем код ответа proverkacheka (1 = успех)
     if data.get("code") != 1:
         return None
 
-    # Путь к данным чека в ответе API
     ticket = (
         data.get("data", {})
         .get("json", {})
@@ -153,17 +151,113 @@ async def fetch_receipt_from_fns(
         .get("receipt", {})
     )
 
-    # Альтернативный путь (API v1 иногда возвращает иначе)
     if not ticket:
         ticket = data.get("data", {}).get("json", {})
 
     if not ticket:
         return None
 
+    return _parse_ticket_dict(ticket, fn, fd, fp, source="proverkacheka")
+
+
+# ============================================================
+# Запрос к nalog.ru FNS mobile API
+# ============================================================
+
+_NALOG_BASE = "https://irkkt-mobile.nalog.ru:8888"
+
+_NALOG_HEADERS = {
+    "clientVersion": "2.9.0",
+    "Device-Id": str(uuid.UUID("7c82010f-16cc-446b-8f66-fc2da4de2445")).upper(),
+    "Device-OS": "Android",
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+}
+
+
+async def _nalog_get_session(inn: str, password: str) -> str | None:
+    """Получает sessionId по ИНН и паролю от lkfl.nalog.ru."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            resp = await client.post(
+                f"{_NALOG_BASE}/v2/mobile/users/lkfl/auth",
+                json={"inn": inn, "client_secret": password, "os": "android"},
+                headers=_NALOG_HEADERS,
+            )
+            if resp.status_code == 200:
+                return resp.json().get("sessionId")
+    except Exception:
+        pass
+    return None
+
+
+async def fetch_receipt_nalog_ru(
+    fn: str,
+    fd: str,
+    fp: str,
+    date: str = "",
+    amount: str = "0",
+) -> dict | None:
+    """
+    Получает детализацию чека через официальный API ФНС (nalog.ru).
+
+    Требует одно из:
+      - Переменная окружения NALOG_SESSION_ID (sessionId из приложения «Проверка чека ФНС»)
+      - Переменные NALOG_INN + NALOG_PASSWORD (ИНН и пароль от lkfl.nalog.ru)
+
+    Если ни одно не задано — возвращает None.
+    """
+    session_id = os.environ.get("NALOG_SESSION_ID", "")
+
+    # Попытка получить сессию по ИНН+паролю, если sessionId не задан
+    if not session_id:
+        inn = os.environ.get("NALOG_INN", "")
+        password = os.environ.get("NALOG_PASSWORD", "")
+        if inn and password:
+            session_id = await _nalog_get_session(inn, password) or ""
+
+    if not session_id:
+        return None
+
+    # Формируем строку QR для lookup
+    qr_string = f"t={date}&s={amount}&fn={fn}&i={fd}&fp={fp}&n=1"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+            resp = await client.post(
+                f"{_NALOG_BASE}/v2/ticket",
+                json={"qr": qr_string},
+                headers={**_NALOG_HEADERS, "sessionId": session_id},
+            )
+            if resp.status_code == 401:
+                # Сессия истекла — сбрасываем, но ничего не можем сделать без авторизации
+                return None
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            ticket = (
+                data.get("ticket", {})
+                .get("document", {})
+                .get("receipt", {})
+            )
+            if not ticket:
+                return None
+            return _parse_ticket_dict(ticket, fn, fd, fp, source="nalog.ru")
+    except Exception:
+        return None
+
+
+# ============================================================
+# Общий парсер структуры чека
+# ============================================================
+
+def _parse_ticket_dict(ticket: dict, fn: str, fd: str, fp: str, source: str) -> dict:
+    """Нормализует словарь чека из разных источников в единый формат."""
     items = [
         {
             "name": item.get("name", ""),
-            "price": round(item.get("price", 0) / 100, 2),       # копейки → рубли
+            "price": round(item.get("price", 0) / 100, 2),
             "quantity": item.get("quantity", 1),
             "sum": round(item.get("sum", 0) / 100, 2),
             "nds_type": item.get("ndsType"),
@@ -197,7 +291,7 @@ async def fetch_receipt_from_fns(
         "fiscal_sign": ticket.get("fiscalSign") or fp,
         "items": items,
         "items_count": len(items),
-        "source": "proverkacheka",
+        "source": source,
     }
 
 
@@ -209,6 +303,11 @@ async def get_receipt_data(qr_raw: str) -> dict:
     """
     Главная функция. Парсит QR, валидирует, запрашивает API.
     Всегда возвращает словарь (никогда не падает).
+
+    Порядок попыток:
+      1. proverkacheka.com (если задан FNS_CLIENT_SECRET)
+      2. nalog.ru FNS API (если задан NALOG_SESSION_ID или NALOG_INN+NALOG_PASSWORD)
+      3. Только данные из QR (без позиций)
 
     Поля в ответе:
       - valid: bool — прошёл ли QR валидацию
@@ -229,30 +328,48 @@ async def get_receipt_data(qr_raw: str) -> dict:
             "error": validation_msg,
         }
 
-    details = await fetch_receipt_from_fns(
-        fn=parsed["fn"],
-        fd=parsed["fd"],
-        fp=parsed["fp"],
-        amount=parsed.get("sum", "0"),
-        date=parsed.get("date", ""),
-        operation_type=parsed.get("operation_type", "1"),
-    )
+    fn = parsed["fn"]
+    fd = parsed["fd"]
+    fp = parsed["fp"]
+    amount = parsed.get("sum", "0")
+    date = parsed.get("date", "")
+    op = parsed.get("operation_type", "1")
+
+    # Попытка 1: proverkacheka.com
+    details = await fetch_receipt_from_fns(fn=fn, fd=fd, fp=fp, amount=amount, date=date, operation_type=op)
+
+    # Попытка 2: nalog.ru (если первая не удалась)
+    if details is None:
+        details = await fetch_receipt_nalog_ru(fn=fn, fd=fd, fp=fp, date=date, amount=amount)
+
+    # Формируем сообщение об ошибке при отсутствии детализации
+    if details is None:
+        has_proverkacheka = bool(settings.fns_client_secret)
+        has_nalog = bool(
+            os.environ.get("NALOG_SESSION_ID")
+            or (os.environ.get("NALOG_INN") and os.environ.get("NALOG_PASSWORD"))
+        )
+        if not has_proverkacheka and not has_nalog:
+            error_msg = (
+                "Детализация чека недоступна. Для получения списка позиций задайте "
+                "одну из переменных окружения: FNS_CLIENT_SECRET (proverkacheka.com) "
+                "или NALOG_SESSION_ID (nalog.ru)."
+            )
+        else:
+            error_msg = "Не удалось получить данные от ФНС. Чек может не существовать или произошла ошибка API."
+    else:
+        error_msg = None
 
     return {
         "valid": True,
         "has_details": details is not None,
         "parsed": {
-            "fn": parsed["fn"],
-            "fd": parsed["fd"],
-            "fp": parsed["fp"],
-            "amount": float(parsed.get("sum", 0) or 0),
+            "fn": fn,
+            "fd": fd,
+            "fp": fp,
+            "amount": float(amount or 0),
             "purchase_date": parsed.get("purchase_date_iso"),
         },
         "details": details,
-        "error": None if details else (
-            "Детализация чека недоступна: API ключ не задан. "
-            "Зарегистрируйтесь на proverkacheka.com для получения ключа."
-            if not settings.fns_client_secret
-            else "Не удалось получить данные от ФНС. Чек может не существовать или произошла ошибка API."
-        ),
+        "error": error_msg,
     }

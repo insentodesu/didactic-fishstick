@@ -23,7 +23,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
 
   Future<void> _load() async {
     try {
-      final j = await api.getForecast(demo: true);
+      final j = await api.getForecast();
       if (mounted) setState(() { _data = _ForecastData.fromJson(j); _loading = false; });
     } catch (_) {
       if (mounted) setState(() { _data = _ForecastData.demo(); _loading = false; });
