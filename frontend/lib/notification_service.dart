@@ -44,14 +44,35 @@ class NotificationSettings {
 // ---------------------------------------------------------------------------
 
 class NotificationService {
-  static String get permission => web.Notification.permission;
+  // iOS Safari and some browsers don't support the Notifications API at all.
+  // Guard every access so the app doesn't crash on unsupported platforms.
+  static String get permission {
+    try {
+      return web.Notification.permission;
+    } catch (_) {
+      return 'default';
+    }
+  }
+
   static bool get isGranted => permission == 'granted';
   static bool get isDenied => permission == 'denied';
+  static bool get isSupported {
+    try {
+      web.Notification.permission; // throws if not supported
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   // Requests browser notification permission.
   static Future<bool> requestPermission() async {
-    final result = await web.Notification.requestPermission().toDart;
-    return result.toDart == 'granted';
+    try {
+      final result = await web.Notification.requestPermission().toDart;
+      return result.toDart == 'granted';
+    } catch (_) {
+      return false;
+    }
   }
 
   // Shows a browser notification immediately.

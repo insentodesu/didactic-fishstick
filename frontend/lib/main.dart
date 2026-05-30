@@ -1037,6 +1037,8 @@ class _NotificationSettingsSheet extends StatefulWidget {
 class _NotificationSettingsSheetState extends State<_NotificationSettingsSheet> {
   NotificationSettings _s = const NotificationSettings(dailyEnabled: false, weeklyEnabled: false, dailyHour: 21, dailyMin: 0);
   bool _granted = false;
+  bool _denied = false;
+  bool _supported = false;
   bool _loading = true;
 
   @override
@@ -1045,7 +1047,13 @@ class _NotificationSettingsSheetState extends State<_NotificationSettingsSheet> 
   Future<void> _load() async {
     try {
       final s = await NotificationService.loadSettings();
-      if (mounted) setState(() { _s = s; _granted = NotificationService.isGranted; _loading = false; });
+      if (mounted) setState(() {
+        _s = s;
+        _granted = NotificationService.isGranted;
+        _denied = NotificationService.isDenied;
+        _supported = NotificationService.isSupported;
+        _loading = false;
+      });
     } catch (_) {
       if (mounted) setState(() { _loading = false; });
     }
@@ -1096,6 +1104,17 @@ class _NotificationSettingsSheetState extends State<_NotificationSettingsSheet> 
   }
 
   Widget _badge() {
+    if (!_supported) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(color: kYellowBg, borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [
+          const Icon(Icons.info_outline, size: 18, color: kYellow),
+          const SizedBox(width: 10),
+          Expanded(child: Text('Браузер не поддерживает push-уведомления.\nИспользуйте Chrome или Firefox.', style: TextStyle(fontFamily: kFontText, fontSize: 13, color: kInk2))),
+        ]),
+      );
+    }
     final color = _granted ? kGreen : kRed;
     final bg = _granted ? kGreenBg : kRedBg;
     final text = _granted ? 'Уведомления разрешены' : 'Уведомления не разрешены';
@@ -1106,9 +1125,12 @@ class _NotificationSettingsSheetState extends State<_NotificationSettingsSheet> 
         Icon(_granted ? Icons.check_circle_outline : Icons.block_outlined, size: 18, color: color),
         const SizedBox(width: 10),
         Expanded(child: Text(text, style: TextStyle(fontFamily: kFontText, fontSize: 13, color: color))),
-        if (!_granted && !NotificationService.isDenied)
+        if (!_granted && !_denied)
           GestureDetector(
-            onTap: () async { final ok = await NotificationService.requestPermission(); setState(() => _granted = ok); },
+            onTap: () async {
+              final ok = await NotificationService.requestPermission();
+              setState(() { _granted = ok; _denied = !ok; });
+            },
             child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: kGreen, borderRadius: BorderRadius.circular(8)), child: const Text('Разрешить', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 12, color: Colors.white))),
           ),
       ]),
