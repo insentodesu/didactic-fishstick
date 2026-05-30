@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Простой и понятный трекер личных финансов.">
+
+  <!-- iOS PWA support -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Финансы">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#2A4D3E">
+
+  <!-- Разрешение на камеру для сканирования QR (mobile_scanner / getUserMedia) -->
+  <meta http-equiv="Permissions-Policy" content="camera=*">
+
+
+  <title>Финансы</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    body { margin: 0; background: #F4F1EC; }
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center;
+      justify-content: center; background: #F4F1EC;
+      font-family: -apple-system, sans-serif; color: #2A4D3E;
+    }
+    .spinner {
+      width: 34px; height: 34px; border: 3px solid #2A4D3E33;
+      border-top-color: #2A4D3E; border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div></div>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
