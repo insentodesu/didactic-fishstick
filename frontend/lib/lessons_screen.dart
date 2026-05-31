@@ -42,7 +42,18 @@ class _LessonsScreenState extends State<LessonsScreen> {
             child: ListView(
               padding: EdgeInsets.fromLTRB(16, 20, 16, isWide(context) ? 40 : 100),
               children: [
-                FpFadeIn(delay: Duration.zero, child: FpOverline('Уроки')),
+                Row(children: [
+                  GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Container(
+                      width: 36, height: 36,
+                      decoration: const BoxDecoration(color: kSurface, shape: BoxShape.circle),
+                      child: const Icon(Icons.arrow_back, size: 18, color: kInk1),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FpOverline('Уроки'),
+                ]),
                 const SizedBox(height: 8),
                 FpFadeIn(delay: const Duration(milliseconds: 40), child: Text('6 уроков · 2–5 минут каждый', style: dsSmall(color: kInk2))),
                 const SizedBox(height: 16),

@@ -37,6 +37,7 @@ bool _mockMode = false;
 Map<String, dynamic>? _mockTrafficLight;
 Map<String, dynamic>? _mockForecast;
 List<TxRecord> _mockTransactions = [];
+final List<TxRecord> _localManualTransactions = [];
 
 // Широковещательный стрим — экраны подписываются и перезагружают данные.
 final _mockChanges = StreamController<void>.broadcast();
@@ -46,6 +47,11 @@ Stream<void> get onMockDataChanged => _mockChanges.stream;
 final _txChanges = StreamController<void>.broadcast();
 Stream<void> get onTransactionChanged => _txChanges.stream;
 void notifyTransactionChanged() => _txChanges.add(null);
+
+void addLocalTransaction(TxRecord tx) {
+  _localManualTransactions.insert(0, tx);
+  _txChanges.add(null);
+}
 
 bool get isMockMode => _mockMode;
 
@@ -65,6 +71,7 @@ void clearMockMode() {
   _mockTrafficLight = null;
   _mockForecast = null;
   _mockTransactions = [];
+  _localManualTransactions.clear();
   _mockChanges.add(null);
 }
 
@@ -456,8 +463,8 @@ class TxRecord {
 // ---------------------------------------------------------------------------
 
 Future<List<TxRecord>> getTransactionHistory({int page = 1, int pageSize = 100, bool? isIncome, bool demo = false}) async {
-  if (_mockMode) return _mockTransactions;
-  if (demo) return _kDemoTransactions;
+  if (_mockMode) return [..._localManualTransactions, ..._mockTransactions];
+  if (demo) return [..._localManualTransactions, ..._kDemoTransactions];
   final params = <String, String>{'page': page.toString(), 'page_size': pageSize.toString()};
   if (isIncome != null) params['is_income'] = isIncome.toString();
   final data = await _getAuth<Map<String, dynamic>>(_uri('/transactions/').replace(queryParameters: params));

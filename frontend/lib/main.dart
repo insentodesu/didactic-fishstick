@@ -670,6 +670,7 @@ class _AddTxSheetState extends State<_AddTxSheet> {
   String _cat = 'Еда';
   String? _nameErr, _amtErr;
   static const _cats = ['Еда', 'Транспорт', 'Покупки', 'Развлечения', 'Здоровье', 'ЖКУ', 'Подписки', 'Прочее'];
+  static const _catIcons = {'Еда': '🍕', 'Транспорт': '🚗', 'Покупки': '🛍️', 'Развлечения': '🎬', 'Здоровье': '💊', 'ЖКУ': '🏠', 'Подписки': '📱', 'Прочее': '📦'};
 
   @override
   void dispose() { _name.dispose(); _amount.dispose(); super.dispose(); }
@@ -682,7 +683,18 @@ class _AddTxSheetState extends State<_AddTxSheet> {
     final desc = _name.text.trim();
     final amount = parsed!.abs();
     Navigator.pop(context, api.Tx(DateTime.now().millisecondsSinceEpoch, desc, _isExpense ? _cat : 'Доход', _isExpense ? -amount : amount, 'Сегодня'));
-    // Сохраняем на бэкенд и уведомляем экран истории
+    // Сразу добавляем в локальную историю (работает в демо/мок режиме без авторизации)
+    api.addLocalTransaction(api.TxRecord(
+      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
+      name: desc,
+      categoryIcon: _isExpense ? (_catIcons[_cat] ?? '📦') : '💰',
+      categoryName: _isExpense ? _cat : 'Доход',
+      amount: amount,
+      isIncome: !_isExpense,
+      date: DateTime.now(),
+      source: 'manual',
+    ));
+    // Также сохраняем на бэкенд для авторизованных пользователей
     api.postManualTransaction(description: desc, amount: amount, isIncome: !_isExpense, categoryName: _isExpense ? _cat : null)
         .then((_) => api.notifyTransactionChanged())
         .catchError((_) {});
@@ -697,6 +709,23 @@ class _AddTxSheetState extends State<_AddTxSheet> {
       if (!mounted) return;
       Navigator.pop(context);
       await showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => _ReceiptSheet(data: result));
+      // После закрытия чека добавляем расход в локальную историю
+      final details = result['details'] as Map<String, dynamic>?;
+      final parsed = result['parsed'] as Map<String, dynamic>? ?? {};
+      final total = (details?['total_amount'] as num?)?.toDouble() ?? (parsed['amount'] as num?)?.toDouble() ?? 0.0;
+      final seller = (details?['seller_name'] as String?)?.isNotEmpty == true ? details!['seller_name'] as String : 'Чек';
+      if (total > 0) {
+        api.addLocalTransaction(api.TxRecord(
+          id: 'receipt_${DateTime.now().millisecondsSinceEpoch}',
+          name: seller,
+          categoryIcon: '🧾',
+          categoryName: 'Покупки',
+          amount: total,
+          isIncome: false,
+          date: DateTime.now(),
+          source: 'receipt',
+        ));
+      }
     } catch (e) {
       if (!mounted) return;
       final detail = e is api.ApiException ? e.detail : 'Попробуйте снова';
