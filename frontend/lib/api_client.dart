@@ -36,10 +36,16 @@ Future<http.Response> _put(Uri uri, {Map<String, String>? headers}) =>
 bool _mockMode = false;
 Map<String, dynamic>? _mockTrafficLight;
 Map<String, dynamic>? _mockForecast;
+List<TxRecord> _mockTransactions = [];
 
 // Широковещательный стрим — экраны подписываются и перезагружают данные.
 final _mockChanges = StreamController<void>.broadcast();
 Stream<void> get onMockDataChanged => _mockChanges.stream;
+
+// Стрим изменений транзакций (ручное добавление).
+final _txChanges = StreamController<void>.broadcast();
+Stream<void> get onTransactionChanged => _txChanges.stream;
+void notifyTransactionChanged() => _txChanges.add(null);
 
 bool get isMockMode => _mockMode;
 
@@ -50,6 +56,7 @@ void setMockAnalytics({
   _mockMode = true;
   _mockTrafficLight = trafficLight;
   _mockForecast = forecast;
+  _mockTransactions = _kMockTransactions;
   _mockChanges.add(null);
 }
 
@@ -57,6 +64,7 @@ void clearMockMode() {
   _mockMode = false;
   _mockTrafficLight = null;
   _mockForecast = null;
+  _mockTransactions = [];
   _mockChanges.add(null);
 }
 
@@ -396,7 +404,7 @@ Future<Map<String, dynamic>> postOnboarding({
     });
 
 // ---------------------------------------------------------------------------
-// Простая модель транзакции (для AddTxSheet)
+// Простая модель транзакции (для AddTxSheet — локальная)
 // ---------------------------------------------------------------------------
 
 class Tx {
@@ -405,3 +413,97 @@ class Tx {
   final double amount;
   const Tx(this.id, this.name, this.cat, this.amount, this.date);
 }
+
+// ---------------------------------------------------------------------------
+// Полная модель транзакции (для истории)
+// ---------------------------------------------------------------------------
+
+class TxRecord {
+  final String id;
+  final String name;
+  final String categoryIcon;
+  final String categoryName;
+  final double amount;
+  final bool isIncome;
+  final DateTime date;
+  final String source;
+
+  const TxRecord({
+    required this.id, required this.name, required this.categoryIcon,
+    required this.categoryName, required this.amount, required this.isIncome,
+    required this.date, required this.source,
+  });
+
+  factory TxRecord.fromJson(Map<String, dynamic> j) {
+    final merchant = j['merchant_name'] as String?;
+    final desc = j['description'] as String?;
+    final income = j['is_income'] as bool? ?? false;
+    return TxRecord(
+      id: j['id']?.toString() ?? '',
+      name: (merchant?.isNotEmpty == true ? merchant : desc) ?? 'Транзакция',
+      categoryIcon: j['category_icon'] as String? ?? (income ? '💰' : '📦'),
+      categoryName: j['category'] as String? ?? (income ? 'Доход' : 'Прочее'),
+      amount: (j['amount'] as num?)?.toDouble() ?? 0.0,
+      isIncome: income,
+      date: j['transaction_date'] != null ? DateTime.parse(j['transaction_date'] as String) : DateTime.now(),
+      source: j['source'] as String? ?? 'bank_statement',
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// История транзакций
+// ---------------------------------------------------------------------------
+
+Future<List<TxRecord>> getTransactionHistory({int page = 1, int pageSize = 100, bool? isIncome, bool demo = false}) async {
+  if (_mockMode) return _mockTransactions;
+  if (demo) return _kMockTransactions;
+  final params = <String, String>{'page': page.toString(), 'page_size': pageSize.toString()};
+  if (isIncome != null) params['is_income'] = isIncome.toString();
+  final data = await _getAuth<Map<String, dynamic>>(_uri('/transactions/').replace(queryParameters: params));
+  final items = data['items'] as List? ?? [];
+  return items.map((e) => TxRecord.fromJson(e as Map<String, dynamic>)).toList();
+}
+
+Future<TxRecord> postManualTransaction({
+  required String description,
+  required double amount,
+  required bool isIncome,
+  String? categoryName,
+}) async {
+  final body = <String, dynamic>{
+    'description': description,
+    'amount': amount,
+    'is_income': isIncome,
+    if (categoryName != null) 'category_name': categoryName,
+  };
+  final data = await _postAuth<Map<String, dynamic>>(_uri('/transactions/manual'), body: body);
+  return TxRecord.fromJson(data);
+}
+
+// ---------------------------------------------------------------------------
+// Мок-транзакции (соответствуют моковой аналитике Альфа-Банк фев–май 2026)
+// ---------------------------------------------------------------------------
+
+final _kMockTransactions = <TxRecord>[
+  TxRecord(id: 'm01', name: 'Зарплата', categoryIcon: '💰', categoryName: 'Доход', amount: 44210, isIncome: true, date: DateTime(2026, 5, 15), source: 'mock'),
+  TxRecord(id: 'm02', name: 'Фриланс', categoryIcon: '💰', categoryName: 'Доход', amount: 25025, isIncome: true, date: DateTime(2026, 5, 10), source: 'mock'),
+  TxRecord(id: 'm03', name: 'Пятёрочка', categoryIcon: '🍕', categoryName: 'Еда', amount: 1847, isIncome: false, date: DateTime(2026, 5, 28), source: 'mock'),
+  TxRecord(id: 'm04', name: 'Wildberries', categoryIcon: '🛍️', categoryName: 'Покупки', amount: 3200, isIncome: false, date: DateTime(2026, 5, 12), source: 'mock'),
+  TxRecord(id: 'm05', name: 'Яндекс Такси', categoryIcon: '🚗', categoryName: 'Транспорт', amount: 540, isIncome: false, date: DateTime(2026, 5, 11), source: 'mock'),
+  TxRecord(id: 'm06', name: 'Кредитный платёж', categoryIcon: '💳', categoryName: 'Финансы', amount: 5000, isIncome: false, date: DateTime(2026, 5, 20), source: 'mock'),
+  TxRecord(id: 'm07', name: 'МТС', categoryIcon: '📱', categoryName: 'Связь', amount: 203, isIncome: false, date: DateTime(2026, 5, 1), source: 'mock'),
+  TxRecord(id: 'm08', name: 'Яндекс Плюс', categoryIcon: '🎵', categoryName: 'Подписки', amount: 299, isIncome: false, date: DateTime(2026, 5, 3), source: 'mock'),
+  TxRecord(id: 'm09', name: 'Зарплата', categoryIcon: '💰', categoryName: 'Доход', amount: 43099, isIncome: true, date: DateTime(2026, 4, 15), source: 'mock'),
+  TxRecord(id: 'm10', name: 'ВкусВилл', categoryIcon: '🍕', categoryName: 'Еда', amount: 2340, isIncome: false, date: DateTime(2026, 4, 22), source: 'mock'),
+  TxRecord(id: 'm11', name: 'ЖКУ', categoryIcon: '🏠', categoryName: 'Коммунальные', amount: 4800, isIncome: false, date: DateTime(2026, 4, 12), source: 'mock'),
+  TxRecord(id: 'm12', name: 'Кредитный платёж', categoryIcon: '💳', categoryName: 'Финансы', amount: 5000, isIncome: false, date: DateTime(2026, 4, 20), source: 'mock'),
+  TxRecord(id: 'm13', name: 'Кинопоиск', categoryIcon: '🎬', categoryName: 'Подписки', amount: 399, isIncome: false, date: DateTime(2026, 4, 5), source: 'mock'),
+  TxRecord(id: 'm14', name: 'Яндекс Такси', categoryIcon: '🚗', categoryName: 'Транспорт', amount: 780, isIncome: false, date: DateTime(2026, 4, 10), source: 'mock'),
+  TxRecord(id: 'm15', name: 'Зарплата', categoryIcon: '💰', categoryName: 'Доход', amount: 44210, isIncome: true, date: DateTime(2026, 3, 15), source: 'mock'),
+  TxRecord(id: 'm16', name: 'Перекрёсток', categoryIcon: '🍕', categoryName: 'Еда', amount: 1560, isIncome: false, date: DateTime(2026, 3, 20), source: 'mock'),
+  TxRecord(id: 'm17', name: 'Кредитный платёж', categoryIcon: '💳', categoryName: 'Финансы', amount: 5000, isIncome: false, date: DateTime(2026, 3, 20), source: 'mock'),
+  TxRecord(id: 'm18', name: 'Интернет', categoryIcon: '🌐', categoryName: 'Связь', amount: 203, isIncome: false, date: DateTime(2026, 3, 1), source: 'mock'),
+  TxRecord(id: 'm19', name: 'Аптека', categoryIcon: '💊', categoryName: 'Здоровье', amount: 1200, isIncome: false, date: DateTime(2026, 3, 25), source: 'mock'),
+  TxRecord(id: 'm20', name: 'СберМаркет', categoryIcon: '🛒', categoryName: 'Еда', amount: 2890, isIncome: false, date: DateTime(2026, 3, 8), source: 'mock'),
+];

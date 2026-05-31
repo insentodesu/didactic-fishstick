@@ -1,13 +1,22 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UploadStatementResponse(BaseModel):
     statement_id: str
     status: str
+
+
+class ManualTransactionRequest(BaseModel):
+    description: str
+    amount: float
+    is_income: bool
+    category_name: Optional[str] = None
+    transaction_date: Optional[datetime] = None
 
 
 class TransactionResponse(BaseModel):
@@ -17,10 +26,12 @@ class TransactionResponse(BaseModel):
     merchant_name: str | None
     category_id: int | None
     category: str | None = None
+    category_icon: str | None = None
     category_confidence: float | None
     description: str | None
     transaction_date: datetime
     created_at: datetime
+    source: str = "bank_statement"
 
     model_config = {"from_attributes": True}
 

@@ -1,7 +1,7 @@
 import logging
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -14,6 +14,7 @@ from app.config import settings
 from app.db.session import get_db
 from app.schemas.transaction import (
     CategoryStatsResponse,
+    ManualTransactionRequest,
     MerchantStatsResponse,
     TransactionListResponse,
     TransactionResponse,
@@ -33,6 +34,8 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", "
 def _row_to_response(row) -> TransactionResponse:
     data = dict(row._mapping if hasattr(row, "_mapping") else row)
     data["category"] = data.pop("category_name", None)
+    data.setdefault("category_icon", None)
+    data.setdefault("source", "bank_statement")
     return TransactionResponse.model_validate(data)
 
 
@@ -118,7 +121,8 @@ async def list_transactions(
     params["offset"] = offset
     rows = await db.execute(text(f"""
         SELECT t.id, t.amount, t.is_income, t.merchant_name, t.category_id, t.category_confidence,
-               t.description, t.transaction_date, t.created_at, c.name_ru AS category_name
+               t.description, t.transaction_date, t.created_at, t.source,
+               c.name_ru AS category_name, c.icon AS category_icon
         FROM transactions.transactions t
         LEFT JOIN transactions.categories c ON c.id = t.category_id
         WHERE {where}
@@ -232,6 +236,43 @@ async def monthly_timeline(
     return [dict(r._mapping) for r in rows]
 
 
+@router.post("/manual", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
+async def create_manual_transaction(
+    body: ManualTransactionRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Ручное добавление транзакции пользователем (без выписки)."""
+    tx_id = str(uuid.uuid4())
+    tx_date = body.transaction_date or datetime.utcnow()
+
+    # Resolve category_id by Russian name or use sensible defaults
+    category_id = 11 if body.is_income else 13  # 11=Доходы, 13=Прочее
+    if body.category_name:
+        row = (await db.execute(
+            text("SELECT id FROM transactions.categories WHERE name_ru = :name LIMIT 1"),
+            {"name": body.category_name},
+        )).one_or_none()
+        if row:
+            category_id = row[0]
+
+    await db.execute(text("""
+        INSERT INTO transactions.transactions
+            (id, user_id, amount, is_income, merchant_name, description,
+             category_id, category_confidence, transaction_date, source)
+        VALUES
+            (:id, :user_id, :amount, :is_income, :merchant, :desc,
+             :cat_id, 1.0, :date, 'manual')
+    """), {
+        "id": tx_id, "user_id": user_id,
+        "amount": abs(body.amount), "is_income": body.is_income,
+        "merchant": body.description, "desc": body.description,
+        "cat_id": category_id, "date": tx_date,
+    })
+    await db.commit()
+    return await get_transaction(tx_id, db, user_id)
+
+
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_transaction(
     transaction_id: str,
@@ -240,7 +281,8 @@ async def get_transaction(
 ):
     result = await db.execute(text("""
         SELECT t.id, t.amount, t.is_income, t.merchant_name, t.category_id, t.category_confidence,
-               t.description, t.transaction_date, t.created_at, c.name_ru AS category_name
+               t.description, t.transaction_date, t.created_at, t.source,
+               c.name_ru AS category_name, c.icon AS category_icon
         FROM transactions.transactions t
         LEFT JOIN transactions.categories c ON c.id = t.category_id
         WHERE t.id = :id AND t.user_id = :user_id AND t.is_deleted = false

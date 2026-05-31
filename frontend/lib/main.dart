@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart' as api;
 import 'ds.dart';
 import 'forecast_screen.dart';
+import 'history_screen.dart';
 import 'lessons_screen.dart';
 import 'notification_service.dart';
 import 'pet_screen.dart';
@@ -281,6 +282,7 @@ class _MainShellState extends State<MainShell> {
     _TabItem(Icons.pets_outlined, Icons.pets, 'Питомец'),
     _TabItem(Icons.savings_outlined, Icons.savings, 'Накопления'),
     _TabItem(Icons.school_outlined, Icons.school, 'Уроки'),
+    _TabItem(Icons.receipt_long_outlined, Icons.receipt_long, 'История'),
   ];
 
   @override
@@ -292,6 +294,7 @@ class _MainShellState extends State<MainShell> {
       PetScreen(onLesson: () => setState(() => _tab = 4)),
       const SavingsScreen(),
       const LessonsScreen(),
+      HistoryScreen(demoMode: widget.demoMode),
     ];
     if (wide) {
       return Scaffold(
@@ -676,7 +679,13 @@ class _AddTxSheetState extends State<_AddTxSheet> {
     final ne = _name.text.trim().isEmpty ? 'Введите описание' : null;
     final ae = _amount.text.trim().isEmpty ? 'Введите сумму' : parsed == null ? 'Некорректная сумма' : parsed <= 0 ? 'Сумма > 0' : null;
     if (ne != null || ae != null) { setState(() { _nameErr = ne; _amtErr = ae; }); return; }
-    Navigator.pop(context, api.Tx(DateTime.now().millisecondsSinceEpoch, _name.text.trim(), _isExpense ? _cat : 'Доход', _isExpense ? -parsed!.abs() : parsed!.abs(), 'Сегодня'));
+    final desc = _name.text.trim();
+    final amount = parsed!.abs();
+    Navigator.pop(context, api.Tx(DateTime.now().millisecondsSinceEpoch, desc, _isExpense ? _cat : 'Доход', _isExpense ? -amount : amount, 'Сегодня'));
+    // Сохраняем на бэкенд и уведомляем экран истории
+    api.postManualTransaction(description: desc, amount: amount, isIncome: !_isExpense, categoryName: _isExpense ? _cat : null)
+        .then((_) => api.notifyTransactionChanged())
+        .catchError((_) {});
   }
 
   Future<void> _scanReceipt() async {

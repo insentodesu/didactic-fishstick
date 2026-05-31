@@ -110,8 +110,12 @@ CREATE TABLE IF NOT EXISTS transactions.transactions (
     description     TEXT,
     transaction_date TIMESTAMPTZ NOT NULL,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
-    is_deleted      BOOLEAN DEFAULT FALSE
+    is_deleted      BOOLEAN DEFAULT FALSE,
+    source          VARCHAR(20)  NOT NULL DEFAULT 'bank_statement'
 );
+
+-- Migration for existing deployments
+ALTER TABLE transactions.transactions ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'bank_statement';
 
 CREATE TABLE IF NOT EXISTS transactions.merchant_aliases (
     id          SERIAL PRIMARY KEY,
