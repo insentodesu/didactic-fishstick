@@ -1,9 +1,12 @@
+import logging
 import os
 import uuid
 from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +69,10 @@ async def upload_statement(
     """), {"id": statement_id, "user_id": user_id, "filename": file.filename, "fmt": ext.lstrip(".")})
     await db.commit()
 
-    process_statement.delay(statement_id, file_path, user_id)
+    try:
+        process_statement.delay(statement_id, file_path, user_id)
+    except Exception:
+        logger.warning("Failed to queue process_statement task for statement %s", statement_id)
 
     return UploadStatementResponse(statement_id=statement_id, status="processing")
 

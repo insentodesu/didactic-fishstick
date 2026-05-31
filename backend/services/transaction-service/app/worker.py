@@ -141,15 +141,15 @@ def process_statement(self, statement_id: str, file_path: str, user_id: str):
                     "conf": 0.85 if tx.get("category_id") else None,
                 })
 
-            total_income = sum(float(t.amount) for t in transactions if t.is_income)
-            total_expense = sum(float(t.amount) for t in transactions if not t.is_income)
+            total_income = sum(float(t['amount']) for t in transactions if t.get('is_income'))
+            total_expense = sum(float(t['amount']) for t in transactions if not t.get('is_income'))
 
             conn.execute(text("""
                 UPDATE transactions.bank_statements
                 SET status = 'done', bank_name = :bank,
                     total_income = :income, total_expense = :expense
                 WHERE id = :id
-            """), {"bank": f"llm_{ext.lstrip('.')}", "id": statement_id})
+            """), {"bank": f"llm_{ext.lstrip('.')}", "id": statement_id, "income": total_income, "expense": total_expense})
             conn.commit()
 
         Path(file_path).unlink(missing_ok=True)
