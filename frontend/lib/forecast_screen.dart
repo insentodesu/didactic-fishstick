@@ -80,6 +80,11 @@ class _ForecastScreenState extends State<ForecastScreen> {
                           onPressed: () async {
                             final file = await showStatementUploadSheet(context);
                             if (file == null || !mounted) return;
+                            if (file.isMock) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Данные из выписки загружены.'), behavior: SnackBarBehavior.floating));
+                              _load();
+                              return;
+                            }
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
                             try {
                               await uploadStatement(file);

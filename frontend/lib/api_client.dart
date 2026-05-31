@@ -29,6 +29,31 @@ Future<http.Response> _put(Uri uri, {Map<String, String>? headers}) =>
     http.put(uri, headers: headers).timeout(_kTimeout, onTimeout: _timeoutError);
 
 // ---------------------------------------------------------------------------
+// Mock mode — клиентская аналитика из выписки, без обращений к серверу
+// ---------------------------------------------------------------------------
+
+bool _mockMode = false;
+Map<String, dynamic>? _mockTrafficLight;
+Map<String, dynamic>? _mockForecast;
+
+bool get isMockMode => _mockMode;
+
+void setMockAnalytics({
+  required Map<String, dynamic> trafficLight,
+  required Map<String, dynamic> forecast,
+}) {
+  _mockMode = true;
+  _mockTrafficLight = trafficLight;
+  _mockForecast = forecast;
+}
+
+void clearMockMode() {
+  _mockMode = false;
+  _mockTrafficLight = null;
+  _mockForecast = null;
+}
+
+// ---------------------------------------------------------------------------
 // Token storage (access + refresh)
 // ---------------------------------------------------------------------------
 
@@ -336,11 +361,15 @@ Future<void> markAllNotificationsRead() async {
 // Аналитика — светофор + прогноз + онбординг
 // ---------------------------------------------------------------------------
 
-Future<Map<String, dynamic>> getTrafficLight({bool demo = false}) async =>
-    _getAuth<Map<String, dynamic>>(_uri('/analytics/traffic-light').replace(queryParameters: demo ? {'demo': 'true'} : null));
+Future<Map<String, dynamic>> getTrafficLight({bool demo = false}) async {
+  if (_mockMode && _mockTrafficLight != null) return _mockTrafficLight!;
+  return _getAuth<Map<String, dynamic>>(_uri('/analytics/traffic-light').replace(queryParameters: demo ? {'demo': 'true'} : null));
+}
 
-Future<Map<String, dynamic>> getForecast({bool demo = false, int months = 6}) async =>
-    _getAuth<Map<String, dynamic>>(_uri('/analytics/forecast').replace(queryParameters: {'months': months.toString(), if (demo) 'demo': 'true'}));
+Future<Map<String, dynamic>> getForecast({bool demo = false, int months = 6}) async {
+  if (_mockMode && _mockForecast != null) return _mockForecast!;
+  return _getAuth<Map<String, dynamic>>(_uri('/analytics/forecast').replace(queryParameters: {'months': months.toString(), if (demo) 'demo': 'true'}));
+}
 
 Future<Map<String, dynamic>> postOnboarding({
   required double monthlyIncome,

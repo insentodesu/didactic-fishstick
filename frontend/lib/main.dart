@@ -75,6 +75,7 @@ class _RootGateState extends State<_RootGate> {
 
   Future<void> _logout() async {
     await api.clearAllTokens();
+    api.clearMockMode();
     setState(() { _demoMode = false; _gate = _Gate.auth; });
   }
 
@@ -399,6 +400,14 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final file = await showStatementUploadSheet(context);
       if (file == null || !mounted) return;
+
+      if (file.isMock) {
+        setState(() => _showWeeklyBanner = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Данные из выписки загружены.'), behavior: SnackBarBehavior.floating));
+        _loadAll();
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
       await uploadStatement(file);
       await NotificationService.markStatementUploaded();
