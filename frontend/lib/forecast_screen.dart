@@ -154,7 +154,9 @@ class _ForecastScreenState extends State<ForecastScreen> {
 
   Widget _barChart(List<_MonthBar> months) {
     const maxH = 90.0;
+    if (months.isEmpty) return const SizedBox(height: maxH + 20);
     final maxPdn = months.map((m) => m.pdn).reduce(math.max);
+    final safeMax = maxPdn > 0 ? maxPdn : 1.0;
     return SizedBox(
       height: maxH + 20,
       child: Row(
@@ -162,7 +164,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
         children: months.map((m) {
           final z = zoneFor(m.pdn);
           final zc = zoneColors(z);
-          final h = (m.pdn / maxPdn * maxH).clamp(8.0, maxH);
+          final h = (m.pdn / safeMax * maxH).clamp(8.0, maxH);
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -352,7 +354,7 @@ class _ForecastData {
     final debt = (current['debt_payment'] as num?)?.toDouble() ?? 43264;
     final expenses = (current['expenses'] as num?)?.toDouble() ?? 28600;
     final free = (current['free'] as num?)?.toDouble() ?? 20136;
-    final pdn = debt / income * 100;
+    final pdn = (current['pdn'] as num?)?.toDouble() ?? (income > 0 ? debt / income * 100 : 0.0);
 
     final hist = (j['history'] as List?) ?? [];
     final forecast = (j['forecast'] as List?) ?? [];
