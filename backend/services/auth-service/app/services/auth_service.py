@@ -1,17 +1,23 @@
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.user import PasswordResetToken, RefreshToken, User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def normalize_phone(phone: str) -> str:
+    """Canonical phone form: digits only (handles +7 vs 7 vs 8 variants)."""
+    return re.sub(r"\D", "", phone)
 
 
 def hash_password(password: str) -> str:
@@ -88,7 +94,13 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
 
 
 async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
-    result = await db.execute(select(User).where(User.phone == phone, User.is_active == True))
+    normalized = normalize_phone(phone)
+    result = await db.execute(
+        select(User).where(
+            User.is_active == True,
+            func.regexp_replace(User.phone, r"[^0-9]", "", "g") == normalized,
+        )
+    )
     return result.scalar_one_or_none()
 
 

@@ -104,7 +104,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Не удалось отправить файл. Проверьте соединение и попробуйте снова.';
+        _error = e is api.ApiException
+            ? e.detail
+            : 'Не удалось отправить файл. Проверьте соединение и попробуйте снова.';
       });
     }
   }

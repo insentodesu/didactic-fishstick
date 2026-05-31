@@ -1,12 +1,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class UserResponse(BaseModel):
     id: UUID
-    email: EmailStr
+    # str, not EmailStr: phone users get synthetic emails like phone_...@finpet.local
+    email: str
+    phone: str | None = None
     name: str | None
     avatar_url: str | None
     is_verified: bool

@@ -109,25 +109,23 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  final _nameCtrl = TextEditingController();
   bool _isRegister = false, _loading = false, _obscure = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    for (final c in [_phoneCtrl, _passCtrl, _nameCtrl]) {
+    for (final c in [_phoneCtrl, _passCtrl]) {
       c.addListener(() => setState(() => _error = null));
     }
   }
 
   @override
-  void dispose() { _phoneCtrl.dispose(); _passCtrl.dispose(); _nameCtrl.dispose(); super.dispose(); }
+  void dispose() { _phoneCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
 
   bool get _canSubmit {
     final phone = _phoneCtrl.text.trim().replaceAll(RegExp(r'[^\d+]'), '');
     if (phone.length < 10 || _passCtrl.text.length < 6) return false;
-    if (_isRegister && _nameCtrl.text.trim().isEmpty) return false;
     return true;
   }
 
@@ -136,11 +134,7 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() { _loading = true; _error = null; });
     try {
       if (_isRegister) {
-        await api.registerPhone(phone: _phoneCtrl.text.trim(), password: _passCtrl.text, name: _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim());
-        if (_nameCtrl.text.trim().isNotEmpty) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('user_name', _nameCtrl.text.trim());
-        }
+        await api.registerPhone(phone: _phoneCtrl.text.trim(), password: _passCtrl.text);
       } else {
         await api.loginPhone(phone: _phoneCtrl.text.trim(), password: _passCtrl.text);
         try {
@@ -150,9 +144,11 @@ class _AuthScreenState extends State<AuthScreen> {
       }
       if (mounted) widget.onAuthenticated();
     } on api.ApiException catch (e) {
-      setState(() { _loading = false; _error = e.detail; });
+      if (mounted) setState(() => _error = e.detail);
     } catch (_) {
-      setState(() { _loading = false; _error = 'Проверь подключение и попробуй снова'; });
+      if (mounted) setState(() => _error = 'Проверь подключение и попробуй снова');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -181,7 +177,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   ]),
                 ),
                 const SizedBox(height: 24),
-                if (_isRegister) ...[_lbl('Ваше имя'), _field(_nameCtrl, 'Например, Алексей', cap: TextCapitalization.words), const SizedBox(height: 14)],
                 _lbl('Номер телефона'),
                 _phoneField(),
                 const SizedBox(height: 14),

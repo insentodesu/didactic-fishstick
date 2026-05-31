@@ -13,7 +13,7 @@ ANONYMOUS_USER_ID = "00000000-0000-0000-0000-000000000000"
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> str:
-    if credentials is None:
+    if credentials is None or not credentials.credentials or credentials.credentials.lower() in ("null", "undefined"):
         return ANONYMOUS_USER_ID
     try:
         payload = jwt.decode(

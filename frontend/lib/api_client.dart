@@ -35,6 +35,12 @@ Future<http.Response> _put(Uri uri, {Map<String, String>? headers}) =>
 String? _accessToken;
 String? _refreshToken;
 
+bool _isUsableToken(String? token) {
+  if (token == null || token.isEmpty) return false;
+  final lower = token.toLowerCase();
+  return lower != 'null' && lower != 'undefined';
+}
+
 Future<void> _saveTokens(String access, String refresh) async {
   _accessToken = access;
   _refreshToken = refresh;
@@ -44,11 +50,22 @@ Future<void> _saveTokens(String access, String refresh) async {
 }
 
 Future<String?> loadToken() async {
-  if (_accessToken != null) return _accessToken;
-  final prefs = await SharedPreferences.getInstance();
-  _accessToken = prefs.getString('access_token');
-  _refreshToken = prefs.getString('refresh_token');
+  if (_accessToken == null) {
+    final prefs = await SharedPreferences.getInstance();
+    _accessToken = prefs.getString('access_token');
+    _refreshToken = prefs.getString('refresh_token');
+  }
+  if (!_isUsableToken(_accessToken)) _accessToken = null;
+  if (!_isUsableToken(_refreshToken)) _refreshToken = null;
   return _accessToken;
+}
+
+Future<void> _clearAuthTokens() async {
+  _accessToken = null;
+  _refreshToken = null;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove('access_token');
+  await prefs.remove('refresh_token');
 }
 
 Future<void> clearAllTokens() async {
@@ -67,7 +84,7 @@ Future<bool> isLoggedIn() async => (await loadToken()) != null;
 Future<bool> tryRefreshTokens() async {
   final prefs = await SharedPreferences.getInstance();
   final rt = _refreshToken ?? prefs.getString('refresh_token');
-  if (rt == null) return false;
+  if (!_isUsableToken(rt)) return false;
   try {
     final resp = await _post(
       _uri('/auth/refresh'),
@@ -89,7 +106,7 @@ Future<bool> tryRefreshTokens() async {
 
 Map<String, String> _headers({bool auth = true}) {
   final h = <String, String>{'Content-Type': 'application/json'};
-  if (auth && _accessToken != null) h['Authorization'] = 'Bearer $_accessToken';
+  if (auth && _isUsableToken(_accessToken)) h['Authorization'] = 'Bearer $_accessToken';
   return h;
 }
 
@@ -185,25 +202,28 @@ Future<Map<String, dynamic>> getMe() async => _getAuth<Map<String, dynamic>>(_ur
 // Транзакции
 // ---------------------------------------------------------------------------
 
-Future<Map<String, dynamic>> uploadStatement(Uint8List bytes, String filename) async {
-  await loadToken();
+Future<http.Response> _sendStatementUpload(Uint8List bytes, String filename, {required bool withAuth}) async {
   final req = http.MultipartRequest('POST', _uri('/transactions/upload'));
-  if (_accessToken != null && _accessToken!.isNotEmpty) {
+  if (withAuth && _isUsableToken(_accessToken)) {
     req.headers['Authorization'] = 'Bearer $_accessToken';
   }
   req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
   final streamed = await req.send().timeout(_kUploadTimeout, onTimeout: _timeoutError);
-  if (streamed.statusCode == 401) {
+  return http.Response.fromStream(streamed);
+}
+
+Future<Map<String, dynamic>> uploadStatement(Uint8List bytes, String filename) async {
+  await loadToken();
+  var resp = await _sendStatementUpload(bytes, filename, withAuth: _isUsableToken(_accessToken));
+  if (resp.statusCode == 401 && _isUsableToken(_accessToken)) {
     final ok = await tryRefreshTokens();
-    if (ok) {
-      final req2 = http.MultipartRequest('POST', _uri('/transactions/upload'));
-      req2.headers['Authorization'] = 'Bearer $_accessToken';
-      req2.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-      final s2 = await req2.send().timeout(_kUploadTimeout, onTimeout: _timeoutError);
-      return _decode<Map<String, dynamic>>(await http.Response.fromStream(s2));
+    if (ok) resp = await _sendStatementUpload(bytes, filename, withAuth: true);
+    if (resp.statusCode == 401) {
+      await _clearAuthTokens();
+      resp = await _sendStatementUpload(bytes, filename, withAuth: false);
     }
   }
-  return _decode<Map<String, dynamic>>(await http.Response.fromStream(streamed));
+  return _decode<Map<String, dynamic>>(resp);
 }
 
 Future<Map<String, dynamic>> getTransactionStats({String? dateFrom, String? dateTo}) async {

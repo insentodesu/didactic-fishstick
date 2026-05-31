@@ -29,7 +29,7 @@ class PhoneRegisterRequest(BaseModel):
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
-        cleaned = re.sub(r"[^\d+]", "", v.strip())
+        cleaned = re.sub(r"\D", "", v.strip())
         if len(cleaned) < 10:
             raise ValueError("Некорректный номер телефона")
         return cleaned
@@ -45,6 +45,14 @@ class PhoneRegisterRequest(BaseModel):
 class PhoneLoginRequest(BaseModel):
     phone: str
     password: str
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        cleaned = re.sub(r"\D", "", v.strip())
+        if len(cleaned) < 10:
+            raise ValueError("Некорректный номер телефона")
+        return cleaned
 
 
 class TokenResponse(BaseModel):

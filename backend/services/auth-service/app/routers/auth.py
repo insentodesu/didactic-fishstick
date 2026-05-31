@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.user import User
-import re
 
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -25,6 +25,7 @@ from app.services.auth_service import (
     get_user_by_email,
     get_user_by_phone,
     hash_password,
+    normalize_phone,
     rotate_refresh_token,
     verify_password,
 )
@@ -90,12 +91,12 @@ async def refresh_tokens(body: RefreshRequest, request: Request, db: AsyncSessio
 @router.post("/register-phone", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register_phone(body: PhoneRegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Регистрация по номеру телефона + пароль."""
-    phone = re.sub(r"[^\d+]", "", body.phone)
+    phone = normalize_phone(body.phone)
     existing = await get_user_by_phone(db, phone)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Номер телефона уже зарегистрирован")
 
-    fake_email = f"phone_{phone.lstrip('+').replace(' ', '')}@finpet.local"
+    fake_email = f"phone_{phone}@finpet.local"
     user = User(
         email=fake_email,
         phone=phone,
@@ -103,7 +104,11 @@ async def register_phone(body: PhoneRegisterRequest, request: Request, db: Async
         password_hash=hash_password(body.password),
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Номер телефона уже зарегистрирован")
 
     access = create_access_token(user.id)
     refresh = await create_refresh_token(
@@ -118,7 +123,7 @@ async def register_phone(body: PhoneRegisterRequest, request: Request, db: Async
 @router.post("/login-phone", response_model=TokenResponse)
 async def login_phone(body: PhoneLoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по номеру телефона + пароль."""
-    phone = re.sub(r"[^\d+]", "", body.phone)
+    phone = normalize_phone(body.phone)
     user = await get_user_by_phone(db, phone)
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный номер или пароль")
