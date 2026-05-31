@@ -4,7 +4,8 @@ import 'api_client.dart' as api;
 import 'ds.dart';
 
 class SavingsScreen extends StatefulWidget {
-  const SavingsScreen({super.key});
+  final bool demoMode;
+  const SavingsScreen({super.key, this.demoMode = false});
   @override
   State<SavingsScreen> createState() => _SavingsScreenState();
 }
@@ -12,14 +13,26 @@ class SavingsScreen extends StatefulWidget {
 class _SavingsScreenState extends State<SavingsScreen> {
   _SavingsData? _data;
   bool _loading = true;
+  late List<_GoalItem> _demoGoals;
 
   @override
   void initState() {
     super.initState();
+    _demoGoals = [
+      const _GoalItem(title: 'Подушка безопасности', emoji: '🛡️', current: 62000, target: 150000, monthlyRequired: 12000, deadline: 'марту 2027'),
+    ];
     _load();
   }
 
   Future<void> _load() async {
+    if (widget.demoMode) {
+      final demo = _SavingsData.demo();
+      if (mounted) setState(() {
+        _data = _SavingsData(highDebt: demo.highDebt, goals: List.from(_demoGoals), deposits: demo.deposits, subStats: demo.subStats);
+        _loading = false;
+      });
+      return;
+    }
     try {
       final deposits = await api.getDeposits();
       final goals = await api.getSavingsGoals();
@@ -87,10 +100,22 @@ class _SavingsScreenState extends State<SavingsScreen> {
                       final a = double.tryParse(amtCtrl.text.replaceAll(' ', '').replaceAll(',', '.'));
                       if (t.isEmpty || a == null || a <= 0) return;
                       Navigator.pop(ctx);
-                      try {
-                        await api.createSavingsGoal(title: t, targetAmount: a);
-                        _load();
-                      } catch (_) {}
+                      if (widget.demoMode) {
+                        setState(() {
+                          _demoGoals.add(_GoalItem(title: t, emoji: '🎯', current: 0, target: a));
+                          _data = _SavingsData(
+                            highDebt: _data?.highDebt ?? false,
+                            goals: List.from(_demoGoals),
+                            deposits: _data?.deposits ?? _SavingsData.demo().deposits,
+                            subStats: _data?.subStats,
+                          );
+                        });
+                      } else {
+                        try {
+                          await api.createSavingsGoal(title: t, targetAmount: a);
+                          _load();
+                        } catch (_) {}
+                      }
                     },
                     child: const Text('Создать цель'),
                   ),

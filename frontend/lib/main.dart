@@ -281,19 +281,18 @@ class _MainShellState extends State<MainShell> {
     _TabItem(Icons.trending_up_outlined, Icons.trending_up, 'Прогноз'),
     _TabItem(Icons.pets_outlined, Icons.pets, 'Питомец'),
     _TabItem(Icons.savings_outlined, Icons.savings, 'Накопления'),
-    _TabItem(Icons.school_outlined, Icons.school, 'Уроки'),
     _TabItem(Icons.receipt_long_outlined, Icons.receipt_long, 'История'),
   ];
 
   @override
   Widget build(BuildContext context) {
     final wide = isWide(context);
+    void openLessons() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LessonsScreen()));
     final screens = [
-      HomeScreen(demoMode: widget.demoMode, onSwitchTab: (i) => setState(() => _tab = i), onLogout: widget.onLogout),
+      HomeScreen(demoMode: widget.demoMode, onSwitchTab: (i) => setState(() => _tab = i), onLogout: widget.onLogout, onOpenLessons: openLessons),
       ForecastScreen(demoMode: widget.demoMode),
-      PetScreen(onLesson: () => setState(() => _tab = 4)),
-      const SavingsScreen(),
-      const LessonsScreen(),
+      PetScreen(onLesson: openLessons),
+      SavingsScreen(demoMode: widget.demoMode),
       HistoryScreen(demoMode: widget.demoMode),
     ];
     if (wide) {
@@ -434,7 +433,8 @@ class HomeScreen extends StatefulWidget {
   final bool demoMode;
   final void Function(int) onSwitchTab;
   final VoidCallback? onLogout;
-  const HomeScreen({super.key, required this.demoMode, required this.onSwitchTab, this.onLogout});
+  final VoidCallback? onOpenLessons;
+  const HomeScreen({super.key, required this.demoMode, required this.onSwitchTab, this.onLogout, this.onOpenLessons});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -622,7 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
     child: Row(children: [
       const FpPetAvatar(size: 64), const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Бади ждёт урок', style: dsH3()), const SizedBox(height: 3), Text('2 минуты · покорми его 🦴', style: dsSmall(color: kInk2))])),
-      FpButton.green(onPressed: () => widget.onSwitchTab(4), height: 36, child: const Text('Начать', style: TextStyle(fontSize: 13))),
+      FpButton.green(onPressed: widget.onOpenLessons ?? () => widget.onSwitchTab(2), height: 36, child: const Text('Начать', style: TextStyle(fontSize: 13))),
     ]),
   );
 

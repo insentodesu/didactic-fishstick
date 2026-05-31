@@ -457,7 +457,7 @@ class TxRecord {
 
 Future<List<TxRecord>> getTransactionHistory({int page = 1, int pageSize = 100, bool? isIncome, bool demo = false}) async {
   if (_mockMode) return _mockTransactions;
-  if (demo) return _kMockTransactions;
+  if (demo) return _kDemoTransactions;
   final params = <String, String>{'page': page.toString(), 'page_size': pageSize.toString()};
   if (isIncome != null) params['is_income'] = isIncome.toString();
   final data = await _getAuth<Map<String, dynamic>>(_uri('/transactions/').replace(queryParameters: params));
@@ -480,6 +480,25 @@ Future<TxRecord> postManualTransaction({
   final data = await _postAuth<Map<String, dynamic>>(_uri('/transactions/manual'), body: body);
   return TxRecord.fromJson(data);
 }
+
+// ---------------------------------------------------------------------------
+// Демо-транзакции (PDN 47 %, доход 92 k, долг 43 k — соответствуют demo()-данным экранов)
+// ---------------------------------------------------------------------------
+
+final _kDemoTransactions = <TxRecord>[
+  TxRecord(id: 'd01', name: 'Зарплата', categoryIcon: '💰', categoryName: 'Доход', amount: 80000, isIncome: true, date: DateTime(2026, 5, 15), source: 'mock'),
+  TxRecord(id: 'd02', name: 'Подработка', categoryIcon: '💰', categoryName: 'Доход', amount: 12000, isIncome: true, date: DateTime(2026, 5, 20), source: 'mock'),
+  TxRecord(id: 'd03', name: 'Ипотека', categoryIcon: '🏦', categoryName: 'Финансы', amount: 32000, isIncome: false, date: DateTime(2026, 5, 10), source: 'mock'),
+  TxRecord(id: 'd04', name: 'Автокредит', categoryIcon: '💳', categoryName: 'Финансы', amount: 11264, isIncome: false, date: DateTime(2026, 5, 10), source: 'mock'),
+  TxRecord(id: 'd05', name: 'Продукты', categoryIcon: '🍕', categoryName: 'Еда', amount: 8500, isIncome: false, date: DateTime(2026, 5, 25), source: 'mock'),
+  TxRecord(id: 'd06', name: 'Яндекс Такси', categoryIcon: '🚗', categoryName: 'Транспорт', amount: 3200, isIncome: false, date: DateTime(2026, 5, 18), source: 'mock'),
+  TxRecord(id: 'd07', name: 'Зарплата', categoryIcon: '💰', categoryName: 'Доход', amount: 80000, isIncome: true, date: DateTime(2026, 4, 15), source: 'mock'),
+  TxRecord(id: 'd08', name: 'Подработка', categoryIcon: '💰', categoryName: 'Доход', amount: 12000, isIncome: true, date: DateTime(2026, 4, 22), source: 'mock'),
+  TxRecord(id: 'd09', name: 'Ипотека', categoryIcon: '🏦', categoryName: 'Финансы', amount: 32000, isIncome: false, date: DateTime(2026, 4, 10), source: 'mock'),
+  TxRecord(id: 'd10', name: 'Автокредит', categoryIcon: '💳', categoryName: 'Финансы', amount: 11264, isIncome: false, date: DateTime(2026, 4, 10), source: 'mock'),
+  TxRecord(id: 'd11', name: 'Кафе', categoryIcon: '☕', categoryName: 'Еда', amount: 5600, isIncome: false, date: DateTime(2026, 4, 20), source: 'mock'),
+  TxRecord(id: 'd12', name: 'ЖКУ', categoryIcon: '🏠', categoryName: 'Коммунальные', amount: 6800, isIncome: false, date: DateTime(2026, 4, 12), source: 'mock'),
+];
 
 // ---------------------------------------------------------------------------
 // Мок-транзакции (соответствуют моковой аналитике Альфа-Банк фев–май 2026)
