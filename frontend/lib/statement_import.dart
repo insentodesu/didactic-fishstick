@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart' as api;
+import 'ds.dart';
 
 // Локальные токены (Dart не делит private-символы между файлами).
 const _green = Color(0xFF2A4D3E);
@@ -39,17 +41,227 @@ Future<PickedStatement?> pickStatementFile() async {
 }
 
 // ---------------------------------------------------------------------------
+// Mock: данные из реальной выписки «28 февраля 2026 – 31 мая 2026.xlsx»
+// (Альфа-Банк, счёт 40817810508290297374, клиент Падеров А. С.)
+// ---------------------------------------------------------------------------
+
+const _kMockFileName = 'alfabank_28fev_31mai_2026.csv';
+const _kMockDisplayName = '28 февраля 2026 – 31 мая 2026';
+
+const _kMockCsvData = '''Дата,Описание,Сумма,Категория
+13.03.2026,Зарплата (ООО Работодатель),30441.12,Доходы
+27.03.2026,Зарплата аванс,13768.67,Доходы
+14.04.2026,Зарплата (ООО Работодатель),30707.00,Доходы
+29.04.2026,Зарплата аванс,12392.00,Доходы
+14.05.2026,Зарплата (ООО Работодатель),20494.67,Доходы
+29.05.2026,Зарплата (ООО Работодатель),48740.19,Доходы
+04.03.2026,Пополнение через банкомат,37500.00,Прочие доходы
+28.02.2026,Пятёрочка,-197.98,Еда и продукты
+01.03.2026,Супермаркет,-1347.00,Еда и продукты
+01.03.2026,Магнит,-299.63,Еда и продукты
+08.03.2026,Магнит,-349.99,Еда и продукты
+10.03.2026,Магнит,-206.98,Еда и продукты
+10.03.2026,Светофор (дискаунтер),-155.50,Еда и продукты
+17.03.2026,Магнит,-209.97,Еда и продукты
+19.03.2026,Магнит,-432.36,Еда и продукты
+25.03.2026,Магнит,-145.97,Еда и продукты
+01.04.2026,Магнит,-599.99,Еда и продукты
+05.04.2026,Магнит,-691.60,Еда и продукты
+06.04.2026,Пятёрочка,-219.98,Еда и продукты
+10.04.2026,Магнит,-1058.60,Еда и продукты
+27.04.2026,"Чижик (X5 Digital)",-1951.16,Еда и продукты
+05.05.2026,Горячая выпечка,-270.00,Еда и продукты
+10.05.2026,Магнит,-109.99,Еда и продукты
+17.05.2026,Магнит,-589.96,Еда и продукты
+17.05.2026,Магнит,-266.98,Еда и продукты
+02.03.2026,Пекарня,-270.00,Кафе и рестораны
+08.03.2026,Tori Ramen,-1146.00,Кафе и рестораны
+17.03.2026,Tori Ramen,-580.00,Кафе и рестораны
+20.03.2026,Пекарня,-480.00,Кафе и рестораны
+06.04.2026,Шаурма Тадж-Махал,-610.00,Кафе и рестораны
+17.04.2026,Ресторан eatandsplit,-2813.00,Кафе и рестораны
+29.04.2026,Tori Ramen,-1064.00,Кафе и рестораны
+12.05.2026,Tori Ramen,-735.00,Кафе и рестораны
+28.05.2026,Ресторан Галактика,-939.00,Кафе и рестораны
+29.05.2026,Шаурма Тадж-Махал,-250.00,Кафе и рестораны
+04.03.2026,Gold Apple Краснодар,-1321.27,Красота
+16.03.2026,Стрижка Шоп,-450.00,Красота
+23.03.2026,Летуаль,-1275.00,Красота
+19.05.2026,Стрижка Шоп,-450.00,Красота
+04.03.2026,Defile (магазин одежды),-8396.00,Одежда и обувь
+11.03.2026,Ветаптека Центральная,-627.00,Животные
+26.03.2026,Ветаптека,-219.00,Животные
+06.05.2026,Ставропольская ВА (ветклиника),-276.00,Животные
+29.05.2026,Ветаптека,-286.00,Животные
+22.03.2026,Транспортная карта ЕБК,-55.00,Транспорт
+22.03.2026,Транспортная карта ЕБК,-55.00,Транспорт
+17.04.2026,Транспортная карта ЕБК,-55.00,Транспорт
+11.03.2026,Магазин электроники,-500.00,Электроника
+16.03.2026,МТС мобильная связь,-750.00,Телефон и интернет
+16.03.2026,Интернет провайдер,-203.00,Телефон и интернет
+20.04.2026,МТС мобильная связь,-203.00,Телефон и интернет
+19.05.2026,МТС мобильная связь,-203.00,Телефон и интернет
+04.04.2026,Леруа Мерлен,-2040.00,Товары для дома
+29.03.2026,Ozon интернет-магазин,-1031.11,Покупки онлайн
+22.04.2026,Ozon интернет-магазин,-1181.00,Покупки онлайн
+31.03.2026,Ежемесячный платёж по кредиту,-5000.00,Кредиты и займы
+''';
+
+// ---------------------------------------------------------------------------
+// Попап выбора файла выписки. Показывает кнопку «Загрузить файл» и список
+// ранее использованных файлов.
+// ---------------------------------------------------------------------------
+
+Future<PickedStatement?> showStatementUploadSheet(BuildContext context) {
+  return showModalBottomSheet<PickedStatement?>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const _StatementUploadSheet(),
+  );
+}
+
+class _StatementUploadSheet extends StatefulWidget {
+  const _StatementUploadSheet();
+  @override
+  State<_StatementUploadSheet> createState() => _StatementUploadSheetState();
+}
+
+class _StatementUploadSheetState extends State<_StatementUploadSheet> {
+  bool _picking = false;
+
+  Future<void> _pickNew() async {
+    setState(() => _picking = true);
+    try {
+      final file = await pickStatementFile();
+      if (mounted) Navigator.pop(context, file);
+    } catch (_) {
+      if (mounted) Navigator.pop(context, null);
+    }
+  }
+
+  void _useMock() {
+    Navigator.pop(
+      context,
+      PickedStatement(_kMockFileName, utf8.encode(_kMockCsvData)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: kSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: kLine, borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(children: [
+                      Text('Загрузить выписку', style: dsH3()),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          width: 34, height: 34,
+                          decoration: const BoxDecoration(color: kCream, shape: BoxShape.circle),
+                          child: const Icon(Icons.close, size: 18, color: kInk1),
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 20),
+                    FpButton.gold(
+                      full: true,
+                      onPressed: _picking ? null : _pickNew,
+                      child: _picking
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: kInkOnGold))
+                          : const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              Icon(Icons.upload_file_outlined, size: 18, color: kInkOnGold),
+                              SizedBox(width: 8),
+                              Text('Загрузить файл'),
+                            ]),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(children: [
+                      const Expanded(child: Divider(color: kLine)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('или', style: dsCaption(color: kInk3)),
+                      ),
+                      const Expanded(child: Divider(color: kLine)),
+                    ]),
+                    const SizedBox(height: 16),
+                    FpOverline('Недавние файлы'),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: _useMock,
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: kCream,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: kLine, width: 1.5),
+                        ),
+                        child: Row(children: [
+                          Container(
+                            width: 44, height: 44,
+                            decoration: BoxDecoration(
+                              color: kGreenBg,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.table_chart_outlined, color: kForest900, size: 22),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _kMockDisplayName,
+                                  style: const TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1),
+                                ),
+                                const SizedBox(height: 2),
+                                Text('Альфа-Банк · 55 операций', style: dsCaption(color: kInk2)),
+                                Text('март – май 2026', style: dsCaption(color: kInk3)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FpChip(
+                            bg: kGoldTint,
+                            color: kInkOnGold,
+                            child: const Text('Использовать', style: TextStyle(fontSize: 12)),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Отправка выписки на бэкенд.
-//
-// TODO(backend): реализовать загрузку файла на ваш API. Пример с http:
-//
-//   final req = http.MultipartRequest('POST', Uri.parse('$apiBase/statements'));
-//   req.files.add(http.MultipartFile.fromBytes('file', file.bytes,
-//       filename: file.fileName));
-//   final resp = await req.send();
-//   if (resp.statusCode != 200) throw Exception('upload failed');
-//
-// Сейчас — заглушка с искусственной задержкой, чтобы UI работал end-to-end.
 // ---------------------------------------------------------------------------
 Future<void> uploadStatement(PickedStatement file) async {
   await api.uploadStatement(Uint8List.fromList(file.bytes), file.fileName);

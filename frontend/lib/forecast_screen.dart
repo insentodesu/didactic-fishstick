@@ -78,7 +78,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
                             child: FpButton.secondary(
                           full: true,
                           onPressed: () async {
-                            final file = await pickStatementFile();
+                            final file = await showStatementUploadSheet(context);
                             if (file == null || !mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
                             try {

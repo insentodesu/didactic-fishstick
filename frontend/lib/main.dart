@@ -397,7 +397,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _importStatement() async {
     try {
-      final file = await pickStatementFile();
+      final file = await showStatementUploadSheet(context);
       if (file == null || !mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
       await uploadStatement(file);
