@@ -2,7 +2,10 @@
 Celery-воркер: фоновая обработка выписок и переклассификация.
 """
 
+import json
 import logging
+import random
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +17,8 @@ from app.config import settings
 from app.services.file_to_text import file_to_text
 
 logger = logging.getLogger(__name__)
+
+DEMO_TX_PATH = Path(__file__).resolve().parent / "data" / "demo_transactions.json"
 
 app = Celery("transaction_worker", broker=settings.celery_broker_url, backend=settings.celery_result_backend)
 
@@ -57,10 +62,15 @@ def _parse_llm_datetime(raw: str) -> datetime:
         return datetime.now()
 
 
-def _call_llm_parse(text: str, filename: str) -> list[dict]:
+def _load_demo_transactions() -> list[dict]:
+    with DEMO_TX_PATH.open(encoding="utf-8") as f:
+        return json.load(f).get("transactions", [])
+
+
+def _call_llm_parse(text: str, filename: str, is_demo: bool = False) -> list[dict]:
     url = f"{settings.llm_service_url.rstrip('/')}/llm/parse-statement"
     with httpx.Client(timeout=180.0) as client:
-        resp = client.post(url, json={"text": text, "filename": filename})
+        resp = client.post(url, json={"text": text, "filename": filename, "is_demo": is_demo})
         resp.raise_for_status()
         return resp.json().get("transactions", [])
 
@@ -83,7 +93,7 @@ def _fallback_parse(content: bytes, filename: str) -> list[dict]:
 
 
 @app.task(bind=True, max_retries=3, default_retry_delay=30)
-def process_statement(self, statement_id: str, file_path: str, user_id: str):
+def process_statement(self, statement_id: str, file_path: str, user_id: str, is_demo: bool = False):
     """
     Обрабатывает загруженную выписку:
       1. Извлекает текст из PDF/Excel/CSV
@@ -91,6 +101,10 @@ def process_statement(self, statement_id: str, file_path: str, user_id: str):
       3. Сохраняет в БД с датой и временем
       4. Запускает детектор подписок
     """
+    logger.info(
+        "process_statement START statement_id=%s user_id=%s file=%s is_demo=%s",
+        statement_id, user_id, file_path, is_demo,
+    )
     engine = _sync_engine()
 
     try:
@@ -101,14 +115,27 @@ def process_statement(self, statement_id: str, file_path: str, user_id: str):
         text_repr = file_to_text(content, filename)
         transactions: list[dict] = []
 
-        try:
-            transactions = _call_llm_parse(text_repr, filename)
-            logger.info("LLM parsed %d transactions from %s", len(transactions), filename)
-        except Exception as llm_err:
-            logger.warning("LLM parse failed (%s), falling back to local parser", llm_err)
-            transactions = _fallback_parse(content, filename)
+        if is_demo:
+            delay = random.uniform(2.0, 5.0)
+            logger.info("LLM parsing statement (demo simulation, sleep %.1fs)...", delay)
+            time.sleep(delay)
+            try:
+                transactions = _call_llm_parse(text_repr, filename, is_demo=True)
+                logger.info("Demo LLM returned %d transactions for %s", len(transactions), filename)
+            except Exception as llm_err:
+                logger.warning("Demo LLM unavailable (%s), using bundled mock JSON", llm_err)
+                transactions = _load_demo_transactions()
+        else:
+            try:
+                transactions = _call_llm_parse(text_repr, filename)
+                logger.info("LLM parsed %d transactions from %s", len(transactions), filename)
+            except Exception as llm_err:
+                logger.warning("LLM parse failed (%s), falling back to local parser", llm_err)
+                transactions = _fallback_parse(content, filename)
+                logger.info("Fallback parser extracted %d transactions from %s", len(transactions), filename)
 
         if not transactions:
+            logger.warning("process_statement: no transactions found statement_id=%s", statement_id)
             with engine.connect() as conn:
                 conn.execute(text("""
                     UPDATE transactions.bank_statements
@@ -151,6 +178,11 @@ def process_statement(self, statement_id: str, file_path: str, user_id: str):
                 WHERE id = :id
             """), {"bank": f"llm_{ext.lstrip('.')}", "id": statement_id, "income": total_income, "expense": total_expense})
             conn.commit()
+
+        logger.info(
+            "process_statement DONE statement_id=%s user_id=%s rows=%d income=%.2f expense=%.2f is_demo=%s",
+            statement_id, user_id, len(transactions), total_income, total_expense, is_demo,
+        )
 
         Path(file_path).unlink(missing_ok=True)
         detect_subscriptions.delay(user_id)

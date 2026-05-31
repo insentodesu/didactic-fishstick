@@ -44,9 +44,18 @@ async def upload_statement(
     file: Annotated[UploadFile, File(description="Выписка: CSV/XLS/XLSX/PDF")],
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
+    demo: bool = Query(False, description="Демо-режим: mock-выписка с симуляцией LLM"),
 ):
     """Загружает выписку из банка и ставит задачу обработки в очередь."""
     ext = os.path.splitext(file.filename or "")[1].lower()
+    content = await file.read()
+
+    if demo and not content:
+        demo_path = os.path.join(os.path.dirname(__file__), "..", "data", "demo_statement.csv")
+        with open(demo_path, "rb") as demo_file:
+            content = demo_file.read()
+        ext = ext or ".csv"
+
     if ext in IMAGE_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -55,12 +64,12 @@ async def upload_statement(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Поддерживаются только CSV, XLS, XLSX, PDF")
 
-    content = await file.read()
     if len(content) > settings.max_upload_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"Файл слишком большой (макс {settings.max_upload_size_mb} МБ)")
 
     statement_id = str(uuid.uuid4())
-    file_path = os.path.join(settings.upload_dir, f"{statement_id}{ext}")
+    display_name = file.filename or ("demo-alfa-statement.csv" if demo else f"statement{ext}")
+    file_path = os.path.join(settings.upload_dir, f"{statement_id}{ext or '.csv'}")
     os.makedirs(settings.upload_dir, exist_ok=True)
 
     with open(file_path, "wb") as f:
@@ -69,11 +78,21 @@ async def upload_statement(
     await db.execute(text("""
         INSERT INTO transactions.bank_statements (id, user_id, filename, file_format, status)
         VALUES (:id, :user_id, :filename, :fmt, 'processing')
-    """), {"id": statement_id, "user_id": user_id, "filename": file.filename, "fmt": ext.lstrip(".")})
+    """), {
+        "id": statement_id,
+        "user_id": user_id,
+        "filename": display_name,
+        "fmt": ext.lstrip(".") or "csv",
+    })
     await db.commit()
 
+    logger.info(
+        "Statement upload accepted statement_id=%s user_id=%s filename=%s bytes=%d is_demo=%s",
+        statement_id, user_id, display_name, len(content), demo,
+    )
+
     try:
-        process_statement.delay(statement_id, file_path, user_id)
+        process_statement.delay(statement_id, file_path, user_id, demo)
     except Exception:
         logger.warning("Failed to queue process_statement task for statement %s", statement_id)
 
@@ -93,6 +112,10 @@ async def list_transactions(
     search: str | None = None,
 ):
     """Список транзакций с фильтрами и пагинацией."""
+    logger.info(
+        "Listing transactions user_id=%s page=%d page_size=%d is_income=%s search=%s",
+        user_id, page, page_size, is_income, search,
+    )
     filters = ["user_id = :user_id", "is_deleted = false"]
     params: dict = {"user_id": user_id}
 

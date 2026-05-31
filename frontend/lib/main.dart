@@ -90,7 +90,10 @@ class _RootGateState extends State<_RootGate> {
       case _Gate.auth:
         return AuthScreen(
           onAuthenticated: _check,
-          onDemo: () => setState(() { _demoMode = true; _gate = _Gate.main; }),
+          onDemo: () {
+            api.logDemoSession(screen: 'auth');
+            setState(() { _demoMode = true; _gate = _Gate.main; });
+          },
         );
       case _Gate.onboarding:
         return OnboardingFlow(onDone: _finishOnboarding);
@@ -139,6 +142,8 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       if (_isRegister) {
         await api.registerPhone(phone: _phoneCtrl.text.trim(), password: _passCtrl.text);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('onboarding_done', false);
       } else {
         await api.loginPhone(phone: _phoneCtrl.text.trim(), password: _passCtrl.text);
         try {
@@ -521,7 +526,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         _topBar(), const SizedBox(height: 8),
                         FpOverline('Кредитный светофор'), const SizedBox(height: 12),
-                        if (widget.demoMode) ...[_demoBanner(), const SizedBox(height: 12)],
                         if (_showDailyBanner) ...[_reminderBanner(daily: true), const SizedBox(height: 12)],
                         if (_showWeeklyBanner) ...[_reminderBanner(daily: false), const SizedBox(height: 12)],
                         if (wide) ...[
@@ -548,16 +552,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
-  Widget _demoBanner() => Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(color: kGoldTint, borderRadius: BorderRadius.circular(14), border: Border.all(color: kGoldDeep.withValues(alpha: 0.4))),
-    child: Row(children: [
-      const Text('👁️', style: TextStyle(fontSize: 16)), const SizedBox(width: 10),
-      Expanded(child: Text('Демо-режим. Данные пробные.', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 13, color: kInkOnGold))),
-      GestureDetector(onTap: widget.onLogout, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: kGold, borderRadius: BorderRadius.circular(8)), child: const Text('Войти', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 12, color: kInkOnGold)))),
-    ]),
-  );
 
   Widget _topBar() => Padding(
     padding: const EdgeInsets.only(bottom: 12),
@@ -1002,11 +996,18 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
   }
 
   Future<void> _finish() async {
-    setState(() => _loading = true);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_name', _nameCtrl.text.trim());
+    if (_loading) return;
+    final name = _nameCtrl.text.trim();
     final income = double.tryParse(_incomeCtrl.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0;
     final debt = double.tryParse(_debtCtrl.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0;
+    if (name.isEmpty) { setState(() => _step = 1); return; }
+    if (income <= 0) { setState(() => _step = 2); return; }
+    if (_creditOption == null) { setState(() => _step = 3); return; }
+    if (_hasCredits && debt <= 0) { setState(() => _step = 3); return; }
+    if (_goals.isEmpty) { setState(() => _step = 4); return; }
+    setState(() => _loading = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', name);
     try { await api.postOnboarding(monthlyIncome: income, hasCredits: _hasCredits, monthlyDebtPayment: debt, goals: _goals.toList()); } catch (_) {}
     if (mounted) widget.onDone();
   }

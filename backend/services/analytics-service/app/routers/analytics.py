@@ -3,18 +3,24 @@
 Агрегирует данные из transaction-service, считает ПДН, прогноз, онбординг.
 """
 
+import json
+import logging
 from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 import httpx
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.services.deps import get_current_user_id
+from app.db.session import get_db
+from app.services.deps import ANONYMOUS_USER_ID, get_current_user_id
 from app.services.health_score import calculate_health_score, calculate_credit_traffic_light
 
 router = APIRouter(prefix="/analytics", tags=["Аналитика"])
+logger = logging.getLogger(__name__)
 
 # ─── demo data ───────────────────────────────────────────────────────────────
 
@@ -77,7 +83,78 @@ def _extract_token(request: Request) -> str:
     return ""
 
 
+async def _ensure_audit_table(db: AsyncSession) -> None:
+    await db.execute(text("""
+        CREATE TABLE IF NOT EXISTS analytics.audit_events (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id UUID,
+            event_type VARCHAR(50) NOT NULL,
+            source VARCHAR(50) DEFAULT 'web',
+            metadata JSONB DEFAULT '{}',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """))
+
+
+async def _write_audit(
+    db: AsyncSession,
+    event_type: str,
+    user_id: str,
+    metadata: dict | None = None,
+    source: str = "web",
+) -> None:
+    await _ensure_audit_table(db)
+    uid = None if user_id == ANONYMOUS_USER_ID else user_id
+    await db.execute(text("""
+        INSERT INTO analytics.audit_events (user_id, event_type, source, metadata)
+        VALUES (:uid, :event_type, :source, CAST(:metadata AS jsonb))
+    """), {
+        "uid": uid,
+        "event_type": event_type,
+        "source": source,
+        "metadata": json.dumps(metadata or {}, ensure_ascii=False),
+    })
+    await db.commit()
+    logger.info("Audit event written type=%s user_id=%s metadata=%s", event_type, user_id, metadata or {})
+
+
+class DemoSessionRequest(BaseModel):
+    source: str = "web"
+    screen: str | None = None
+
+
+class AnalyticsPingRequest(BaseModel):
+    screen: str = "unknown"
+    demo: bool = True
+
+
 # ─── endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/demo-session")
+async def log_demo_session(
+    body: DemoSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Фиксирует старт демо-сессии в audit_events (видно в docker logs analytics)."""
+    logger.info("Demo session started user_id=%s source=%s screen=%s", user_id, body.source, body.screen)
+    await _write_audit(db, "demo_session", user_id, {"source": body.source, "screen": body.screen})
+    return {"status": "ok", "event": "demo_session"}
+
+
+@router.post("/ping")
+async def ping_analytics(
+    body: AnalyticsPingRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Лёгкий ping для демо: пишет audit row и возвращает 200."""
+    logger.info("Analytics ping user_id=%s screen=%s demo=%s", user_id, body.screen, body.demo)
+    await _write_audit(db, "analytics_ping", user_id, {"screen": body.screen, "demo": body.demo})
+    return {"status": "ok", "pong": True}
+
+
+# ─── existing endpoints ───────────────────────────────────────────────────────
 
 @router.get("/traffic-light")
 async def traffic_light(
@@ -87,6 +164,7 @@ async def traffic_light(
 ):
     """Кредитный светофор: ПДН, зона, план шагов."""
     if demo:
+        logger.info("traffic-light demo response user_id=%s", user_id)
         d = _DEMO
         income = d["monthly_income"]
         debt = d["monthly_debt_payment"]
@@ -158,6 +236,7 @@ async def forecast(
 ):
     """Помесячная динамика ПДН + прогноз + картина текущего месяца."""
     if demo:
+        logger.info("forecast demo response user_id=%s months=%d", user_id, months)
         d = _DEMO
         return {
             "current": {

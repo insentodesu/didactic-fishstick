@@ -116,27 +116,22 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
   bool get _busy => _picking || _processingMock || _demoLoading;
 
   Future<void> _pickNew() async {
-    if (widget.demoMode) { _demoDenied(); return; }
-    setState(() => _picking = true);
-    try {
-      final file = await pickStatementFile();
-      if (mounted) Navigator.pop(context, file);
-    } catch (_) {
-      if (mounted) Navigator.pop(context, null);
-    }
+    _showUploadLimitDenied();
   }
 
   Future<void> _useMock() async {
     setState(() => _processingMock = true);
-    await Future.delayed(const Duration(seconds: 5));
     api.setMockAnalytics(
       trafficLight: _kMockTrafficLight,
       forecast: _kMockForecast,
     );
+    try {
+      await api.uploadDemoStatement();
+    } catch (_) {}
     if (mounted) Navigator.pop(context, PickedStatement('', [], isMock: true));
   }
 
-  Future<void> _demoDenied() async {
+  Future<void> _showUploadLimitDenied() async {
     setState(() { _demoLoading = true; _demoError = false; });
     await Future.delayed(const Duration(seconds: 3));
     if (mounted) setState(() { _demoLoading = false; _demoError = true; });

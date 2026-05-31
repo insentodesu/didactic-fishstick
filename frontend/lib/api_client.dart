@@ -249,8 +249,11 @@ Future<Map<String, dynamic>> getMe() async => _getAuth<Map<String, dynamic>>(_ur
 // Транзакции
 // ---------------------------------------------------------------------------
 
-Future<http.Response> _sendStatementUpload(Uint8List bytes, String filename, {required bool withAuth}) async {
-  final req = http.MultipartRequest('POST', _uri('/transactions/upload'));
+Future<http.Response> _sendStatementUpload(Uint8List bytes, String filename, {required bool withAuth, bool demo = false}) async {
+  final req = http.MultipartRequest(
+    'POST',
+    _uri('/transactions/upload').replace(queryParameters: demo ? {'demo': 'true'} : null),
+  );
   if (withAuth && _isUsableToken(_accessToken)) {
     req.headers['Authorization'] = 'Bearer $_accessToken';
   }
@@ -259,18 +262,50 @@ Future<http.Response> _sendStatementUpload(Uint8List bytes, String filename, {re
   return http.Response.fromStream(streamed);
 }
 
-Future<Map<String, dynamic>> uploadStatement(Uint8List bytes, String filename) async {
+Future<Map<String, dynamic>> uploadStatement(Uint8List bytes, String filename, {bool demo = false}) async {
   await loadToken();
-  var resp = await _sendStatementUpload(bytes, filename, withAuth: _isUsableToken(_accessToken));
+  var resp = await _sendStatementUpload(bytes, filename, withAuth: _isUsableToken(_accessToken), demo: demo);
   if (resp.statusCode == 401 && _isUsableToken(_accessToken)) {
     final ok = await tryRefreshTokens();
-    if (ok) resp = await _sendStatementUpload(bytes, filename, withAuth: true);
+    if (ok) resp = await _sendStatementUpload(bytes, filename, withAuth: true, demo: demo);
     if (resp.statusCode == 401) {
       await _clearAuthTokens();
-      resp = await _sendStatementUpload(bytes, filename, withAuth: false);
+      resp = await _sendStatementUpload(bytes, filename, withAuth: false, demo: demo);
     }
   }
   return _decode<Map<String, dynamic>>(resp);
+}
+
+Future<Map<String, dynamic>> uploadDemoStatement() async =>
+    uploadStatement(Uint8List(0), 'demo-alfa-statement.xlsx', demo: true);
+
+/// Fire-and-forget: логирует демо-сессию на бэкенде (audit row + docker logs).
+Future<void> logDemoSession({String screen = 'auth'}) async {
+  try {
+    await _post(
+      _uri('/analytics/demo-session'),
+      headers: _headers(auth: false),
+      body: jsonEncode({'source': 'web', 'screen': screen}),
+    );
+  } catch (_) {}
+}
+
+/// Fire-and-forget: ping analytics для видимой активности в demo/mock.
+Future<void> pingAnalytics({String screen = 'home', bool demo = true}) async {
+  try {
+    await _post(
+      _uri('/analytics/ping'),
+      headers: _headers(auth: false),
+      body: jsonEncode({'screen': screen, 'demo': demo}),
+    );
+  } catch (_) {}
+}
+
+/// Fire-and-forget: дергает list transactions (COUNT в Postgres) без ожидания UI.
+Future<void> pingTransactionList() async {
+  try {
+    await _get(_uri('/transactions/').replace(queryParameters: {'page': '1', 'page_size': '1'}), headers: _headers(auth: false));
+  } catch (_) {}
 }
 
 Future<Map<String, dynamic>> getTransactionStats({String? dateFrom, String? dateTo}) async {
@@ -384,12 +419,20 @@ Future<void> markAllNotificationsRead() async {
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> getTrafficLight({bool demo = false}) async {
-  if (_mockMode && _mockTrafficLight != null) return _mockTrafficLight!;
+  if (_mockMode && _mockTrafficLight != null) {
+    pingAnalytics(screen: 'traffic-light', demo: true);
+    return _mockTrafficLight!;
+  }
+  if (demo) pingAnalytics(screen: 'traffic-light', demo: true);
   return _getAuth<Map<String, dynamic>>(_uri('/analytics/traffic-light').replace(queryParameters: demo ? {'demo': 'true'} : null));
 }
 
 Future<Map<String, dynamic>> getForecast({bool demo = false, int months = 6}) async {
-  if (_mockMode && _mockForecast != null) return _mockForecast!;
+  if (_mockMode && _mockForecast != null) {
+    pingAnalytics(screen: 'forecast', demo: true);
+    return _mockForecast!;
+  }
+  if (demo) pingAnalytics(screen: 'forecast', demo: true);
   return _getAuth<Map<String, dynamic>>(_uri('/analytics/forecast').replace(queryParameters: {'months': months.toString(), if (demo) 'demo': 'true'}));
 }
 
@@ -463,8 +506,14 @@ class TxRecord {
 // ---------------------------------------------------------------------------
 
 Future<List<TxRecord>> getTransactionHistory({int page = 1, int pageSize = 100, bool? isIncome, bool demo = false}) async {
-  if (_mockMode) return [..._localManualTransactions, ..._mockTransactions];
-  if (demo) return [..._localManualTransactions, ..._kDemoTransactions];
+  if (_mockMode) {
+    pingTransactionList();
+    return [..._localManualTransactions, ..._mockTransactions];
+  }
+  if (demo) {
+    pingTransactionList();
+    return [..._localManualTransactions, ..._kDemoTransactions];
+  }
   final params = <String, String>{'page': page.toString(), 'page_size': pageSize.toString()};
   if (isIncome != null) params['is_income'] = isIncome.toString();
   final data = await _getAuth<Map<String, dynamic>>(_uri('/transactions/').replace(queryParameters: params));

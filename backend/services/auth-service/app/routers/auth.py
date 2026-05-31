@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 
 from app.db.session import get_db
 from app.models.user import User
@@ -32,6 +33,7 @@ from app.services.auth_service import (
 from app.services.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Авторизация"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -55,6 +57,7 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
         request.client.host if request.client else None,
     )
     await db.commit()
+    logger.info("User registered user_id=%s email=%s", user.id, body.email)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -70,6 +73,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         request.headers.get("user-agent"),
         request.client.host if request.client else None,
     )
+    logger.info("User login user_id=%s email=%s", user.id, body.email)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -117,6 +121,7 @@ async def register_phone(body: PhoneRegisterRequest, request: Request, db: Async
         request.client.host if request.client else None,
     )
     await db.commit()
+    logger.info("User registered via phone user_id=%s phone=%s", user.id, phone)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -134,6 +139,7 @@ async def login_phone(body: PhoneLoginRequest, request: Request, db: AsyncSessio
         request.headers.get("user-agent"),
         request.client.host if request.client else None,
     )
+    logger.info("User login via phone user_id=%s phone=%s", user.id, phone)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 

@@ -239,13 +239,24 @@ class _SavingsScreenState extends State<SavingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Row(children: [
-              Text(g.emoji, style: const TextStyle(fontSize: 20)),
-              const SizedBox(width: 8),
-              Text(g.title, style: dsH3()),
-            ]),
-            Text('${fmtRub(g.current)} / ${fmtRub(g.target)}', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 13, color: kInk3)),
+          Row(children: [
+            Text(g.emoji, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(g.title, style: dsH3(), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${fmtRub(g.current)} / ${fmtRub(g.target)}',
+                  style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 13, color: kInk3),
+                  maxLines: 1,
+                ),
+              ),
+            ),
           ]),
           const SizedBox(height: 12),
           ClipRRect(

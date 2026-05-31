@@ -1,4 +1,8 @@
 import json
+import logging
+import random
+import time
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -10,6 +14,9 @@ from app.services.deps import get_current_user_id
 from app.services.file_to_text import file_to_text, transactions_to_analysis_text
 
 router = APIRouter(prefix="/llm", tags=["LLM / AI"])
+logger = logging.getLogger(__name__)
+
+DEMO_TX_PATH = Path(__file__).resolve().parent.parent / "data" / "demo_transactions.json"
 
 # Публичное название модели. Реальный провайдер скрыт в конфиге.
 BRANDED_MODEL = "finassist-1"
@@ -57,6 +64,14 @@ class SummarizeRequest(BaseModel):
 class ParseStatementRequest(BaseModel):
     text: str
     filename: str = "statement.csv"
+    is_demo: bool = False
+
+
+def _load_demo_transactions() -> list[dict]:
+    if not DEMO_TX_PATH.exists():
+        return []
+    with DEMO_TX_PATH.open(encoding="utf-8") as f:
+        return json.load(f).get("transactions", [])
 
 
 # ========================= ПАРСИНГ ВЫПИСКИ =========================
@@ -83,8 +98,23 @@ async def parse_statement_text(body: ParseStatementRequest):
     Принимает текст выписки, возвращает JSON со списком транзакций.
     Вызывается transaction-service worker (без обязательной авторизации).
     """
+    if body.is_demo:
+        delay = random.uniform(2.0, 5.0)
+        logger.info(
+            "LLM parsing statement (demo simulation) filename=%s sleep=%.1fs",
+            body.filename, delay,
+        )
+        time.sleep(delay)
+        transactions = _load_demo_transactions()
+        if transactions:
+            logger.info("Demo parse-statement returning %d bundled transactions", len(transactions))
+            return {"transactions": transactions, "model": BRANDED_MODEL, "count": len(transactions), "simulated": True}
+        logger.warning("Demo parse-statement: bundled JSON missing, falling back to AIESA")
+
     if not body.text.strip():
         return {"transactions": []}
+
+    logger.info("LLM parsing statement filename=%s chars=%d", body.filename, len(body.text))
 
     # Ограничиваем контекст для LLM
     text = body.text[:50000]
@@ -133,6 +163,12 @@ async def parse_statement_text(body: ParseStatementRequest):
 
         return {"transactions": transactions, "model": BRANDED_MODEL, "count": len(transactions)}
     except Exception as e:
+        logger.warning("AIESA parse-statement failed for %s: %s", body.filename, e)
+        if body.is_demo:
+            fallback = _load_demo_transactions()
+            if fallback:
+                logger.info("AIESA unavailable — demo fallback parser returning %d transactions", len(fallback))
+                return {"transactions": fallback, "model": BRANDED_MODEL, "count": len(fallback), "simulated": True}
         raise HTTPException(status_code=503, detail=f"Не удалось распарсить выписку: {e}")
 
 

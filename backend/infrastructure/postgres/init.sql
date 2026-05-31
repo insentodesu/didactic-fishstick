@@ -6,6 +6,19 @@
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS transactions;
 CREATE SCHEMA IF NOT EXISTS analytics;
+
+CREATE TABLE IF NOT EXISTS analytics.audit_events (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id     UUID,
+    event_type  VARCHAR(50) NOT NULL,
+    source      VARCHAR(50) DEFAULT 'web',
+    metadata    JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_type_created
+    ON analytics.audit_events(event_type, created_at DESC);
+
 CREATE SCHEMA IF NOT EXISTS subscriptions;
 CREATE SCHEMA IF NOT EXISTS investments;
 CREATE SCHEMA IF NOT EXISTS gamification;
