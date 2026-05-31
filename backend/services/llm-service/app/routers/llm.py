@@ -54,6 +54,88 @@ class SummarizeRequest(BaseModel):
     period: str = "месяц"
 
 
+class ParseStatementRequest(BaseModel):
+    text: str
+    filename: str = "statement.csv"
+
+
+# ========================= ПАРСИНГ ВЫПИСКИ =========================
+
+PARSE_STATEMENT_SYSTEM = (
+    "Ты парсер банковских выписок. Из текста выписки извлеки все операции.\n"
+    f"Категории (category_id):\n{CATEGORIES_LIST}\n"
+    "Ответь СТРОГО в формате JSON без markdown:\n"
+    '{"transactions": [{"merchant_name": "...", "description": "...", '
+    '"amount": 1234.56, "is_income": false, "transaction_date": "2026-05-30T14:35:00", "category_id": 1}]}\n'
+    "Правила:\n"
+    "- amount всегда положительное число\n"
+    "- is_income: true для зачислений, false для списаний\n"
+    "- transaction_date в ISO 8601 с датой и временем (если время неизвестно — 12:00:00)\n"
+    "- category_id — число 1-13\n"
+    "- merchant_name — краткое имя получателя/магазина\n"
+    "- Если операций нет — верни {\"transactions\": []}"
+)
+
+
+@router.post("/parse-statement")
+async def parse_statement_text(body: ParseStatementRequest):
+    """
+    Принимает текст выписки, возвращает JSON со списком транзакций.
+    Вызывается transaction-service worker (без обязательной авторизации).
+    """
+    if not body.text.strip():
+        return {"transactions": []}
+
+    # Ограничиваем контекст для LLM
+    text = body.text[:50000]
+
+    messages = [
+        {"role": "system", "content": PARSE_STATEMENT_SYSTEM},
+        {"role": "user", "content": (
+            f"Файл: {body.filename}\n\n"
+            f"Извлеки все транзакции из выписки:\n\n{text}"
+        )},
+    ]
+
+    try:
+        answer = await chat_complete(messages, temperature=0.1, max_tokens=8000)
+        start = answer.find("{")
+        end = answer.rfind("}") + 1
+        if start < 0 or end <= start:
+            raise ValueError("JSON не найден в ответе LLM")
+        data = json.loads(answer[start:end])
+        raw_txs = data.get("transactions", [])
+        if not isinstance(raw_txs, list):
+            raise ValueError("transactions должен быть массивом")
+
+        transactions = []
+        for tx in raw_txs:
+            if not isinstance(tx, dict):
+                continue
+            try:
+                amount = abs(float(tx.get("amount", 0)))
+                if amount <= 0:
+                    continue
+                cat_id = int(tx.get("category_id", 13))
+                if cat_id not in CATEGORY_MAP:
+                    cat_id = 13
+                transactions.append({
+                    "merchant_name": str(tx.get("merchant_name", "Операция"))[:500],
+                    "description": str(tx.get("description", tx.get("merchant_name", "")))[:1000],
+                    "amount": amount,
+                    "is_income": bool(tx.get("is_income", False)),
+                    "transaction_date": str(tx.get("transaction_date", "")),
+                    "category_id": cat_id,
+                    "category": CATEGORY_MAP[cat_id],
+                })
+            except (TypeError, ValueError):
+                continue
+
+        return {"transactions": transactions, "model": BRANDED_MODEL, "count": len(transactions)}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Не удалось распарсить выписку: {e}")
+
+
 # ========================= ЧАТ =========================
 
 @router.post("/chat")

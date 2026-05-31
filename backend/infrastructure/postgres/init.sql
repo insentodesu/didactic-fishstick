@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS transactions.transactions (
     category_id     INTEGER REFERENCES transactions.categories(id),
     category_confidence FLOAT,                  -- уверенность модели при классификации
     description     TEXT,
-    transaction_date DATE NOT NULL,
+    transaction_date TIMESTAMPTZ NOT NULL,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     is_deleted      BOOLEAN DEFAULT FALSE
 );
@@ -342,6 +342,11 @@ CREATE TABLE IF NOT EXISTS receipts.receipts (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
     ON notifications.notifications(user_id, is_read, created_at DESC);
+
+-- Анонимный пользователь (PWA без регистрации)
+INSERT INTO auth.users (id, email, name, is_active, is_verified)
+VALUES ('00000000-0000-0000-0000-000000000000', 'anonymous@finpet.local', 'Anonymous', true, true)
+ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
 -- Базовые категории транзакций

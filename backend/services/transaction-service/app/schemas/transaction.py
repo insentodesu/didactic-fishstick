@@ -16,9 +16,10 @@ class TransactionResponse(BaseModel):
     is_income: bool
     merchant_name: str | None
     category_id: int | None
+    category: str | None = None
     category_confidence: float | None
     description: str | None
-    transaction_date: date
+    transaction_date: datetime
     created_at: datetime
 
     model_config = {"from_attributes": True}

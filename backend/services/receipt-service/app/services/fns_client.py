@@ -19,14 +19,20 @@ QR-код фискального чека содержит строку вида
      Установите переменную окружения NALOG_SESSION_ID
 """
 
+import asyncio
+import base64
+import json
+import logging
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -165,69 +171,286 @@ async def fetch_receipt_from_fns(
 # ============================================================
 
 _LKDR_BASE = "https://lkdr.nalog.ru"
+_LKDR_TOKEN_CACHE_FILE = "/tmp/nalog_lkdr_tokens.json"
+
+# Модульный кэш токенов (живёт в памяти процесса)
+_lkdr_access_token: str = ""
+_lkdr_refresh_token: str = ""
+_token_refresh_lock = asyncio.Lock()
 
 
-async def fetch_receipt_lkdr(fn: str, fd: str, fp: str) -> dict | None:
+def _jwt_payload(token: str) -> dict:
+    """Декодирует payload JWT без проверки подписи."""
+    try:
+        part = token.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part))
+    except Exception:
+        return {}
+
+
+def _token_is_expired(token: str, buffer_seconds: int = 300) -> bool:
+    """Возвращает True, если JWT уже истёк или истечёт через buffer_seconds."""
+    exp = _jwt_payload(token).get("exp", 0)
+    if not exp:
+        return True
+    return datetime.now(timezone.utc).timestamp() > exp - buffer_seconds
+
+
+def _extract_device_id(refresh_token: str) -> str:
+    """Извлекает deviceId из payload refresh-токена."""
+    try:
+        sub = _jwt_payload(refresh_token).get("sub", "")
+        ctx = json.loads(sub)
+        return ctx.get("refreshContext", {}).get("deviceId", "")
+    except Exception:
+        return ""
+
+
+def _load_cached_tokens() -> tuple[str, str]:
+    """Читает токены из файлового кэша (переживает рестарт контейнера)."""
+    try:
+        with open(_LKDR_TOKEN_CACHE_FILE) as f:
+            d = json.load(f)
+            return d.get("access_token", ""), d.get("refresh_token", "")
+    except Exception:
+        return "", ""
+
+
+def _save_cached_tokens(access: str, refresh: str) -> None:
+    """Сохраняет токены в файловый кэш."""
+    try:
+        with open(_LKDR_TOKEN_CACHE_FILE, "w") as f:
+            json.dump({"access_token": access, "refresh_token": refresh}, f)
+    except Exception:
+        pass
+
+
+def _init_lkdr_tokens() -> None:
+    """Инициализирует кэш токенов из env или файла при первом обращении."""
+    global _lkdr_access_token, _lkdr_refresh_token
+
+    # Приоритет: файловый кэш (свежее обновлённые) → env
+    cached_access, cached_refresh = _load_cached_tokens()
+
+    _lkdr_access_token = cached_access or settings.nalog_lkdr_token
+    _lkdr_refresh_token = cached_refresh or settings.nalog_lkdr_refresh_token
+
+
+async def _refresh_lkdr_token() -> bool:
     """
-    Получает полную детализацию чека через lkdr.nalog.ru.
-
-    Алгоритм:
-      1. POST /api/v1/receipt {fn, fd} → список чеков, берём key
-      2. POST /api/v1/receipt/fiscal_data {key} → полные данные с позициями
-
-    Требует переменную окружения NALOG_LKDR_TOKEN (Bearer JWT из lkdr.nalog.ru).
-    Получить: открыть lkdr.nalog.ru → DevTools → любой /api запрос → заголовок Authorization.
-    Токен действует ~1 час, обновляется автоматически при новом логине.
+    Обменивает refresh-token на новую пару access/refresh.
+    Обновляет модульный кэш и файловый кэш.
+    Возвращает True при успехе.
     """
-    token = settings.nalog_lkdr_token
-    if not token:
-        return None
+    global _lkdr_access_token, _lkdr_refresh_token
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
+    refresh = _lkdr_refresh_token or settings.nalog_lkdr_refresh_token
+    if not refresh:
+        logger.warning("nalog lkdr: refresh token не задан")
+        return False
+
+    device_id = _extract_device_id(refresh)
+    payload = {
+        "refreshToken": refresh,
+        "deviceInfo": {
+            "sourceDeviceId": device_id,
+            "sourceType": "WEB",
+            "appVersion": "1.0.0",
+            "metaDetails": {
+                "userAgent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Safari/605.1.15"
+                )
+            },
+        },
     }
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # Шаг 1: найти чек по fn+fd
-            r1 = await client.post(
+            resp = await client.post(
+                f"{_LKDR_BASE}/api/v1/auth/token",
+                json=payload,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+        if resp.status_code != 200:
+            logger.error("nalog lkdr: не удалось обновить токен, статус %s: %s", resp.status_code, resp.text[:200])
+            return False
+
+        data = resp.json()
+        new_access = data.get("token", "")
+        new_refresh = data.get("refreshToken", "") or refresh  # fallback на старый
+        expires_in = data.get("tokenExpireIn", "unknown")
+
+        if not new_access:
+            return False
+
+        _lkdr_access_token = new_access
+        _lkdr_refresh_token = new_refresh
+        _save_cached_tokens(new_access, new_refresh)
+        logger.info("nalog lkdr: токен обновлён, истекает %s", expires_in)
+        return True
+
+    except Exception as exc:
+        logger.error("nalog lkdr: ошибка при обновлении токена: %s", exc)
+        return False
+
+
+async def _get_valid_lkdr_token() -> str:
+    """
+    Возвращает актуальный access-токен, при необходимости обновляет через refresh.
+    Защищено async-локом от параллельных рефрешей.
+    """
+    global _lkdr_access_token, _lkdr_refresh_token
+
+    if not _lkdr_access_token and not _lkdr_refresh_token:
+        _init_lkdr_tokens()
+
+    if _lkdr_access_token and not _token_is_expired(_lkdr_access_token):
+        return _lkdr_access_token
+
+    async with _token_refresh_lock:
+        # Проверяем ещё раз под локом — другой корутин мог уже обновить
+        if _lkdr_access_token and not _token_is_expired(_lkdr_access_token):
+            return _lkdr_access_token
+
+        logger.info("nalog lkdr: access-токен истёк, обновляем через refresh token…")
+        await _refresh_lkdr_token()
+        return _lkdr_access_token
+
+
+async def fetch_receipt_lkdr(fn: str, fd: str, fp: str, receipt_date: str | None = None) -> dict | None:
+    """
+    Получает полную детализацию чека через lkdr.nalog.ru.
+
+    Алгоритм:
+      1. Получаем/обновляем Bearer-токен (авто-рефреш при истечении)
+      2. POST /api/v1/receipt {fn, fd} → список чеков, берём key
+      3. POST /api/v1/receipt/fiscal_data {key} → полные данные с позициями
+
+    Токены хранятся в памяти и /tmp/nalog_lkdr_tokens.json.
+    Для старта нужна пара NALOG_LKDR_TOKEN + NALOG_LKDR_REFRESH_TOKEN в .env.
+    """
+    if not settings.nalog_lkdr_token and not settings.nalog_lkdr_refresh_token:
+        return None
+
+    token = await _get_valid_lkdr_token()
+    if not token:
+        return None
+
+    async def _find_receipt_key(client: httpx.AsyncClient, headers: dict) -> str | None:
+        """
+        Ищет ключ чека по fn/fd через пагинацию (до 50 страниц).
+
+        API возвращает ВСЕ чеки пользователя (10 шт. на страницу, от новых к старым).
+        Ранняя остановка: если даты на текущей странице ушли раньше даты чека,
+        дальше смотреть бессмысленно.
+
+        receipt_date — дата чека из QR (ISO-строка или YYYYMMDD…) для оптимизации.
+        """
+        _MAX_PAGES = 50
+
+        # Нормализуем дату для сравнения (первые 10 символов: YYYY-MM-DD)
+        target_date_prefix: str | None = None
+        if receipt_date:
+            # ISO: "2025-01-15T12:00:00" → "2025-01-15"
+            # или "20250115T120000" → нормализуем
+            d = receipt_date.replace("T", "-").replace("t", "-")
+            if len(d) >= 8 and "-" not in d[:8]:
+                # Compact YYYYMMDD → YYYY-MM-DD
+                target_date_prefix = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+            else:
+                target_date_prefix = d[:10]
+
+        for page in range(_MAX_PAGES):
+            offset = page * 10
+            payload: dict = {"fiscalDriveNumber": fn, "fiscalDocumentNumber": fd}
+            if offset > 0:
+                payload["offset"] = offset
+
+            r = await client.post(
                 f"{_LKDR_BASE}/api/v1/receipt",
-                json={"fiscalDriveNumber": fn, "fiscalDocumentNumber": fd},
+                json=payload,
                 headers=headers,
             )
-            if r1.status_code != 200:
+            if r.status_code == 401:
+                return "__401__"
+            if r.status_code != 200:
                 return None
 
-            receipts = r1.json().get("receipts", [])
-            if not receipts:
-                return None
+            data = r.json()
+            receipts = data.get("receipts", [])
 
-            # Берём первый совпавший чек (fn+fd должны совпасть)
-            key = None
-            for r in receipts:
-                if str(r.get("fiscalDriveNumber")) == fn and str(r.get("fiscalDocumentNumber")) == fd:
-                    key = r.get("key")
+            for rec in receipts:
+                if (
+                    str(rec.get("fiscalDriveNumber", "")) == fn
+                    and str(rec.get("fiscalDocumentNumber", "")) == fd
+                ):
+                    key = rec.get("key")
+                    logger.info(
+                        "nalog lkdr: чек fn=%s fd=%s найден на стр.%d, key=%s…",
+                        fn, fd, page + 1, str(key)[:30],
+                    )
+                    return key
+
+            if not data.get("hasMore"):
+                break
+
+            # Ранняя остановка: если самый старый чек на странице раньше искомого
+            if target_date_prefix and receipts:
+                oldest = str(receipts[-1].get("createdDate", ""))[:10]
+                if oldest and oldest < target_date_prefix:
+                    logger.info(
+                        "nalog lkdr: ранняя остановка на стр.%d (дата страницы %s < целевой %s)",
+                        page + 1, oldest, target_date_prefix,
+                    )
                     break
-            if not key:
-                key = receipts[0].get("key")
-            if not key:
-                return None
 
-            # Шаг 2: полная детализация по key
+        logger.warning(
+            "nalog lkdr: чек fn=%s fd=%s не найден в аккаунте lkdr (проверено стр.%d)",
+            fn, fd, min(page + 1, _MAX_PAGES),
+        )
+        return None
+
+    async def _do_request(bearer: str) -> dict | None:
+        headers = {
+            "Authorization": f"Bearer {bearer}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            key = await _find_receipt_key(client, headers)
+
+            if key == "__401__":
+                return None  # сигнал для рефреша
+            if not key:
+                return False  # чек не найден — не показываем чужой
+
             r2 = await client.post(
                 f"{_LKDR_BASE}/api/v1/receipt/fiscal_data",
                 json={"key": key},
                 headers=headers,
             )
             if r2.status_code != 200:
+                return False
+
+            return _parse_lkdr_receipt(r2.json(), fn, fd, fp)
+
+    try:
+        result = await _do_request(token)
+
+        # 401 → пробуем принудительно обновить токен и повторить один раз
+        if result is None:
+            logger.info("nalog lkdr: получен 401, принудительно обновляем токен…")
+            refreshed = await _refresh_lkdr_token()
+            if not refreshed or not _lkdr_access_token:
                 return None
+            result = await _do_request(_lkdr_access_token)
 
-            data = r2.json()
-            return _parse_lkdr_receipt(data, fn, fd, fp)
+        return result if result else None
 
-    except Exception:
+    except Exception as exc:
+        logger.error("nalog lkdr: неожиданная ошибка: %s", exc)
         return None
 
 
@@ -454,7 +677,7 @@ async def get_receipt_data(qr_raw: str) -> dict:
 
     # Попытка 2: lkdr.nalog.ru (NALOG_LKDR_TOKEN)
     if details is None:
-        details = await fetch_receipt_lkdr(fn=fn, fd=fd, fp=fp)
+        details = await fetch_receipt_lkdr(fn=fn, fd=fd, fp=fp, receipt_date=parsed.get("purchase_date_iso") or parsed.get("date"))
 
     # Попытка 3: nalog.ru mobile API (NALOG_SESSION_ID)
     if details is None:

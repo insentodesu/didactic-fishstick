@@ -4,14 +4,23 @@ from jose import JWTError, jwt
 
 from app.config import settings
 
-bearer = HTTPBearer()
+# auto_error=False — без токена используем анонимного пользователя (как в receipt-service)
+bearer = HTTPBearer(auto_error=False)
+
+ANONYMOUS_USER_ID = "00000000-0000-0000-0000-000000000000"
 
 
 def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> str:
+    if credentials is None:
+        return ANONYMOUS_USER_ID
     try:
-        payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
         if payload.get("type") != "access":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный токен")
         return payload["sub"]

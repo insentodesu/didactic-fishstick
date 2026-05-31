@@ -23,6 +23,15 @@ from app.worker import process_statement
 
 router = APIRouter(prefix="/transactions", tags=["Транзакции"])
 
+ALLOWED_EXTENSIONS = {".csv", ".xls", ".xlsx", ".pdf"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic"}
+
+
+def _row_to_response(row) -> TransactionResponse:
+    data = dict(row._mapping if hasattr(row, "_mapping") else row)
+    data["category"] = data.pop("category_name", None)
+    return TransactionResponse.model_validate(data)
+
 
 @router.post("/upload", response_model=UploadStatementResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_statement(
@@ -32,7 +41,12 @@ async def upload_statement(
 ):
     """Загружает выписку из банка и ставит задачу обработки в очередь."""
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".csv", ".xls", ".xlsx", ".pdf"}:
+    if ext in IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Загрузка изображений не поддерживается. Используйте PDF, Excel или CSV.",
+        )
+    if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Поддерживаются только CSV, XLS, XLSX, PDF")
 
     content = await file.read()
@@ -97,15 +111,16 @@ async def list_transactions(
     params["limit"] = page_size
     params["offset"] = offset
     rows = await db.execute(text(f"""
-        SELECT id, amount, is_income, merchant_name, category_id, category_confidence,
-               description, transaction_date, created_at
-        FROM transactions.transactions
+        SELECT t.id, t.amount, t.is_income, t.merchant_name, t.category_id, t.category_confidence,
+               t.description, t.transaction_date, t.created_at, c.name_ru AS category_name
+        FROM transactions.transactions t
+        LEFT JOIN transactions.categories c ON c.id = t.category_id
         WHERE {where}
-        ORDER BY transaction_date DESC, created_at DESC
+        ORDER BY t.transaction_date DESC, t.created_at DESC
         LIMIT :limit OFFSET :offset
     """), params)
 
-    items = [TransactionResponse.model_validate(dict(r._mapping)) for r in rows]
+    items = [_row_to_response(r) for r in rows]
     return TransactionListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -218,15 +233,16 @@ async def get_transaction(
     user_id: str = Depends(get_current_user_id),
 ):
     result = await db.execute(text("""
-        SELECT id, amount, is_income, merchant_name, category_id, category_confidence,
-               description, transaction_date, created_at
-        FROM transactions.transactions
-        WHERE id = :id AND user_id = :user_id AND is_deleted = false
+        SELECT t.id, t.amount, t.is_income, t.merchant_name, t.category_id, t.category_confidence,
+               t.description, t.transaction_date, t.created_at, c.name_ru AS category_name
+        FROM transactions.transactions t
+        LEFT JOIN transactions.categories c ON c.id = t.category_id
+        WHERE t.id = :id AND t.user_id = :user_id AND t.is_deleted = false
     """), {"id": transaction_id, "user_id": user_id})
     row = result.mappings().one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Транзакция не найдена")
-    return TransactionResponse.model_validate(dict(row))
+    return _row_to_response(row)
 
 
 @router.put("/{transaction_id}/category", response_model=TransactionResponse)

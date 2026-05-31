@@ -87,6 +87,8 @@ services:
     container_name: finassist-celery-worker
     command: celery -A app.worker worker --loglevel=info --concurrency=4 -Q transactions,analytics,subscriptions
     <<: *service-defaults
+    volumes:
+      - uploads_data:/tmp/uploads
     deploy:
       resources:
         limits:

@@ -124,10 +124,19 @@ Future<Map<String, dynamic>> uploadStatement(
 ) async {
   await loadToken();
   final req = http.MultipartRequest('POST', _uri('/transactions/upload'));
-  req.headers['Authorization'] = 'Bearer $_accessToken';
+  if (_accessToken != null && _accessToken!.isNotEmpty) {
+    req.headers['Authorization'] = 'Bearer $_accessToken';
+  }
   req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-  final streamed = await req.send();
-  final resp = await http.Response.fromStream(streamed);
+  var streamed = await req.send();
+  var resp = await http.Response.fromStream(streamed);
+  if (resp.statusCode == 401) {
+    await clearToken();
+    final retry = http.MultipartRequest('POST', _uri('/transactions/upload'));
+    retry.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    streamed = await retry.send();
+    resp = await http.Response.fromStream(streamed);
+  }
   return _decode<Map<String, dynamic>>(resp);
 }
 
@@ -460,4 +469,17 @@ class TxItem {
   );
 
   String get displayName => merchantName?.isNotEmpty == true ? merchantName! : (description?.isNotEmpty == true ? description! : 'Операция');
+
+  /// Форматирует дату и время: «30.05 14:35»
+  String get formattedDateTime {
+    final dt = DateTime.tryParse(transactionDate);
+    if (dt != null) {
+      final d = '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
+      final t = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      return '$d $t';
+    }
+    final parts = transactionDate.split('-');
+    if (parts.length >= 3) return '${parts[2].substring(0, 2)}.${parts[1]}';
+    return transactionDate;
+  }
 }

@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -12,6 +13,78 @@ from app.services.deps import get_current_user_id
 from app.services.fns_client import get_receipt_data
 
 router = APIRouter(prefix="/receipts", tags=["Чеки"])
+
+# Категория «Еда и рестораны» для чеков
+RECEIPT_CATEGORY_ID = 1
+
+
+async def _insert_receipt_transaction(
+    db: AsyncSession,
+    user_id: str,
+    receipt_id: str,
+    parsed: dict,
+    details: dict | None,
+) -> None:
+    """Создаёт запись в transactions.transactions для отображения в истории операций."""
+    fn, fd, fp = parsed.get("fn"), parsed.get("fd"), parsed.get("fp")
+    external_id = f"receipt:{fn}:{fd}:{fp}" if fn and fd and fp else f"receipt:{receipt_id}"
+
+    existing = await db.execute(text("""
+        SELECT id FROM transactions.transactions
+        WHERE user_id = :uid AND external_id = :ext AND is_deleted = false
+        LIMIT 1
+    """), {"uid": user_id, "ext": external_id})
+    if existing.scalar():
+        return
+
+    amount = None
+    merchant = None
+    purchase_date = None
+    description = "Покупка по чеку"
+
+    if details:
+        amount = details.get("total_amount")
+        merchant = details.get("seller_name")
+        purchase_date = details.get("purchase_date")
+        items_count = details.get("items_count", 0)
+        if items_count:
+            description = f"Чек: {items_count} поз."
+
+    if amount is None:
+        amount = parsed.get("amount")
+    if merchant is None:
+        merchant = "Магазин"
+    if purchase_date is None:
+        purchase_date = parsed.get("purchase_date")
+
+    if not amount or float(amount) <= 0:
+        return
+
+    tx_datetime = datetime.now()
+    if purchase_date:
+        if isinstance(purchase_date, datetime):
+            tx_datetime = purchase_date
+        else:
+            try:
+                tx_datetime = datetime.fromisoformat(str(purchase_date).replace("Z", "+00:00"))
+            except ValueError:
+                pass
+
+    await db.execute(text("""
+        INSERT INTO transactions.transactions
+            (user_id, external_id, amount, is_income, merchant_name, description,
+             transaction_date, category_id, category_confidence)
+        VALUES
+            (:uid, :ext, :amount, false, :merchant, :desc, :date, :cat, 0.9)
+    """), {
+        "uid": user_id,
+        "ext": external_id,
+        "amount": float(amount),
+        "merchant": str(merchant)[:500],
+        "desc": description,
+        "date": tx_datetime,
+        "cat": RECEIPT_CATEGORY_ID,
+    })
 
 
 class QRScanRequest(BaseModel):
@@ -65,6 +138,17 @@ async def scan_qr(
         "raw": json.dumps(details, ensure_ascii=False) if details else None,
         "status": "processed" if details else "partial",
     })
+
+    await _insert_receipt_transaction(db, user_id, receipt_id, {
+        "fn": parsed.get("fn"),
+        "fd": parsed.get("fd"),
+        "fp": parsed.get("fp"),
+        "amount": details["total_amount"] if details else parsed.get("amount"),
+        "purchase_date": (
+            details.get("purchase_date") if details
+            else parsed.get("purchase_date") or parsed.get("purchase_date_iso")
+        ),
+    }, details)
     await db.commit()
 
     return {

@@ -678,8 +678,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final amtColor = isIncome ? kGreen : kInk1;
     final sign = isIncome ? '+' : '−';
     final emoji = catEmoji[tx.category] ?? '📦';
-    final dateParts = tx.transactionDate.split('-');
-    final dateStr = dateParts.length == 3 ? '${dateParts[2]}.${dateParts[1]}' : tx.transactionDate;
+    final dateStr = tx.formattedDateTime;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(children: [

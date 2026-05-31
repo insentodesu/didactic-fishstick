@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     fns_api_url: str = "https://proverkacheka.com/api/v1"
     fns_client_secret: str = ""
     upload_dir: str = "/tmp/uploads"
-    nalog_lkdr_token: str = ""  # Bearer token from lkdr.nalog.ru
+    nalog_lkdr_token: str = ""          # Bearer JWT from lkdr.nalog.ru
+    nalog_lkdr_refresh_token: str = ""  # Refresh token from lkdr.nalog.ru (long-lived)
 
 
 settings = Settings()

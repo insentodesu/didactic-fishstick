@@ -28,7 +28,7 @@ class PickedStatement {
 Future<PickedStatement?> pickStatementFile() async {
   final res = await FilePicker.platform.pickFiles(
     type: FileType.custom,
-    allowedExtensions: ['xlsx', 'xls', 'csv'],
+    allowedExtensions: ['xlsx', 'xls', 'csv', 'pdf'],
     withData: true, // важно для web — байты приходят в памяти
   );
   if (res == null || res.files.isEmpty) return null;
@@ -141,7 +141,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     style: TextStyle(fontSize: 15, color: _muted, height: 1.5),
                   ),
                   const SizedBox(height: 28),
-                  _hintRow(Icons.table_chart_outlined, 'Форматы .xlsx, .xls и .csv'),
+                  _hintRow(Icons.table_chart_outlined, 'Форматы .xlsx, .xls, .csv и .pdf'),
                   const SizedBox(height: 12),
                   _hintRow(Icons.cloud_upload_outlined, 'Файл обрабатывается на сервере'),
                   const SizedBox(height: 12),
