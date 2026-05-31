@@ -5,8 +5,9 @@ import 'api_client.dart' as api;
 import 'ds.dart';
 import 'statement_import.dart';
 
-class ForecastScreen extends StatefulWidget {\n  final bool demoMode;
-  const ForecastScreen({super.key});
+class ForecastScreen extends StatefulWidget {
+  final bool demoMode;
+  const ForecastScreen({super.key, this.demoMode = false});
   @override
   State<ForecastScreen> createState() => _ForecastScreenState();
 }
@@ -23,7 +24,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
 
   Future<void> _load() async {
     try {
-      final j = await api.getForecast();
+      final j = await api.getForecast(demo: widget.demoMode);
       if (mounted) setState(() { _data = _ForecastData.fromJson(j); _loading = false; });
     } catch (_) {
       if (mounted) setState(() { _data = _ForecastData.demo(); _loading = false; });

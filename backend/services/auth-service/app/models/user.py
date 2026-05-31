@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import INET, UUID
 
 from app.db.session import Base
 
@@ -34,7 +34,7 @@ class RefreshToken(Base):
     revoked = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     user_agent = Column(Text)
-    ip_address = Column(String(45))
+    ip_address = Column(INET)
 
 
 class PasswordResetToken(Base):
