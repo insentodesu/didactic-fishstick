@@ -41,8 +41,8 @@
   <div id="loading"><div class="spinner"></div></div>
   <script src="flutter_bootstrap.js" async></script>
 
-  <!-- jsQR: QR-сканер для браузера -->
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <!-- jsQR: QR-сканер для браузера. defer — нужен только при скане чека, не блокирует старт. -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" defer></script>
   <script>
     window._qrScanners = {};
 

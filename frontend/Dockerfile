@@ -8,7 +8,10 @@ RUN flutter pub get
 
 COPY . .
 
-RUN flutter build web --release
+# --no-web-resources-cdn: бандлим CanvasKit локально (иначе тянется с gstatic.com,
+#   что в РФ медленно/блокируется — главная причина долгой первой загрузки).
+# --pwa-strategy=offline-first: SW кеширует ассеты, вторая загрузка мгновенная.
+RUN flutter build web --release --no-web-resources-cdn --pwa-strategy=offline-first
 
 # Stage 2: раздача через nginx
 FROM nginx:1.27-alpine

@@ -9,6 +9,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ---------------------------------------------------------------------------
 const _kApiBase = '/api';
 
+// Таймауты: обычный запрос и загрузка файла. Без них спиннер висит вечно
+// при медленном/холодном бэкенде.
+const _kTimeout = Duration(seconds: 20);
+const _kUploadTimeout = Duration(seconds: 120);
+
+Never _timeoutError() => throw ApiException(
+      statusCode: 408,
+      detail: 'Сервер не отвечает. Проверь соединение и попробуй снова.',
+    );
+
+Future<http.Response> _post(Uri uri, {Map<String, String>? headers, Object? body}) =>
+    http.post(uri, headers: headers, body: body).timeout(_kTimeout, onTimeout: _timeoutError);
+
+Future<http.Response> _get(Uri uri, {Map<String, String>? headers}) =>
+    http.get(uri, headers: headers).timeout(_kTimeout, onTimeout: _timeoutError);
+
+Future<http.Response> _put(Uri uri, {Map<String, String>? headers}) =>
+    http.put(uri, headers: headers).timeout(_kTimeout, onTimeout: _timeoutError);
+
 // ---------------------------------------------------------------------------
 // Token storage (access + refresh)
 // ---------------------------------------------------------------------------
@@ -50,7 +69,7 @@ Future<bool> tryRefreshTokens() async {
   final rt = _refreshToken ?? prefs.getString('refresh_token');
   if (rt == null) return false;
   try {
-    final resp = await http.post(
+    final resp = await _post(
       _uri('/auth/refresh'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'refresh_token': rt}),
@@ -89,10 +108,10 @@ T _decode<T>(http.Response resp) {
 /// Выполняет GET с авто-обновлением токена при 401.
 Future<T> _getAuth<T>(Uri uri) async {
   await loadToken();
-  var resp = await http.get(uri, headers: _headers());
+  var resp = await _get(uri, headers: _headers());
   if (resp.statusCode == 401) {
     final ok = await tryRefreshTokens();
-    if (ok) resp = await http.get(uri, headers: _headers());
+    if (ok) resp = await _get(uri, headers: _headers());
   }
   return _decode<T>(resp);
 }
@@ -100,10 +119,10 @@ Future<T> _getAuth<T>(Uri uri) async {
 /// Выполняет POST с авто-обновлением токена при 401.
 Future<T> _postAuth<T>(Uri uri, {Object? body}) async {
   await loadToken();
-  var resp = await http.post(uri, headers: _headers(), body: body != null ? jsonEncode(body) : null);
+  var resp = await _post(uri, headers: _headers(), body: body != null ? jsonEncode(body) : null);
   if (resp.statusCode == 401) {
     final ok = await tryRefreshTokens();
-    if (ok) resp = await http.post(uri, headers: _headers(), body: body != null ? jsonEncode(body) : null);
+    if (ok) resp = await _post(uri, headers: _headers(), body: body != null ? jsonEncode(body) : null);
   }
   return _decode<T>(resp);
 }
@@ -121,14 +140,14 @@ class ApiException implements Exception {
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> register({required String email, required String password, String? name}) async {
-  final resp = await http.post(_uri('/auth/register'), headers: _headers(auth: false), body: jsonEncode({'email': email, 'password': password, if (name != null) 'name': name}));
+  final resp = await _post(_uri('/auth/register'), headers: _headers(auth: false), body: jsonEncode({'email': email, 'password': password, if (name != null) 'name': name}));
   final data = _decode<Map<String, dynamic>>(resp);
   await _saveTokens(data['access_token'] as String, data['refresh_token'] as String);
   return data;
 }
 
 Future<Map<String, dynamic>> login({required String email, required String password}) async {
-  final resp = await http.post(_uri('/auth/login'), headers: _headers(auth: false), body: jsonEncode({'email': email, 'password': password}));
+  final resp = await _post(_uri('/auth/login'), headers: _headers(auth: false), body: jsonEncode({'email': email, 'password': password}));
   final data = _decode<Map<String, dynamic>>(resp);
   await _saveTokens(data['access_token'] as String, data['refresh_token'] as String);
   return data;
@@ -139,7 +158,7 @@ Future<Map<String, dynamic>> login({required String email, required String passw
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> registerPhone({required String phone, required String password, String? name}) async {
-  final resp = await http.post(
+  final resp = await _post(
     _uri('/auth/register-phone'),
     headers: _headers(auth: false),
     body: jsonEncode({'phone': phone, 'password': password, if (name != null) 'name': name}),
@@ -150,7 +169,7 @@ Future<Map<String, dynamic>> registerPhone({required String phone, required Stri
 }
 
 Future<Map<String, dynamic>> loginPhone({required String phone, required String password}) async {
-  final resp = await http.post(
+  final resp = await _post(
     _uri('/auth/login-phone'),
     headers: _headers(auth: false),
     body: jsonEncode({'phone': phone, 'password': password}),
@@ -173,14 +192,14 @@ Future<Map<String, dynamic>> uploadStatement(Uint8List bytes, String filename) a
     req.headers['Authorization'] = 'Bearer $_accessToken';
   }
   req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-  final streamed = await req.send();
+  final streamed = await req.send().timeout(_kUploadTimeout, onTimeout: _timeoutError);
   if (streamed.statusCode == 401) {
     final ok = await tryRefreshTokens();
     if (ok) {
       final req2 = http.MultipartRequest('POST', _uri('/transactions/upload'));
       req2.headers['Authorization'] = 'Bearer $_accessToken';
       req2.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-      final s2 = await req2.send();
+      final s2 = await req2.send().timeout(_kUploadTimeout, onTimeout: _timeoutError);
       return _decode<Map<String, dynamic>>(await http.Response.fromStream(s2));
     }
   }
@@ -290,7 +309,7 @@ Future<List<dynamic>> getNotifications({bool unreadOnly = false}) async =>
 
 Future<void> markAllNotificationsRead() async {
   await loadToken();
-  await http.put(_uri('/notifications/read-all'), headers: _headers());
+  await _put(_uri('/notifications/read-all'), headers: _headers());
 }
 
 // ---------------------------------------------------------------------------
