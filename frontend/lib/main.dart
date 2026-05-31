@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -379,9 +381,20 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   String _userName = '';
   bool _showDailyBanner = false, _showWeeklyBanner = false;
+  StreamSubscription<void>? _mockSub;
 
   @override
-  void initState() { super.initState(); _loadAll(); }
+  void initState() {
+    super.initState();
+    _loadAll();
+    _mockSub = api.onMockDataChanged.listen((_) { if (mounted) _loadAll(); });
+  }
+
+  @override
+  void dispose() {
+    _mockSub?.cancel();
+    super.dispose();
+  }
 
   Future<void> _loadAll() async {
     final prefs = await SharedPreferences.getInstance();

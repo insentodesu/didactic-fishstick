@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -36,6 +37,10 @@ bool _mockMode = false;
 Map<String, dynamic>? _mockTrafficLight;
 Map<String, dynamic>? _mockForecast;
 
+// Широковещательный стрим — экраны подписываются и перезагружают данные.
+final _mockChanges = StreamController<void>.broadcast();
+Stream<void> get onMockDataChanged => _mockChanges.stream;
+
 bool get isMockMode => _mockMode;
 
 void setMockAnalytics({
@@ -45,12 +50,14 @@ void setMockAnalytics({
   _mockMode = true;
   _mockTrafficLight = trafficLight;
   _mockForecast = forecast;
+  _mockChanges.add(null);
 }
 
 void clearMockMode() {
   _mockMode = false;
   _mockTrafficLight = null;
   _mockForecast = null;
+  _mockChanges.add(null);
 }
 
 // ---------------------------------------------------------------------------

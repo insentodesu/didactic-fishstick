@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
@@ -15,11 +16,19 @@ class ForecastScreen extends StatefulWidget {
 class _ForecastScreenState extends State<ForecastScreen> {
   _ForecastData? _data;
   bool _loading = true;
+  StreamSubscription<void>? _mockSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _mockSub = api.onMockDataChanged.listen((_) { if (mounted) _load(); });
+  }
+
+  @override
+  void dispose() {
+    _mockSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {

@@ -108,6 +108,9 @@ class _StatementUploadSheet extends StatefulWidget {
 
 class _StatementUploadSheetState extends State<_StatementUploadSheet> {
   bool _picking = false;
+  bool _processingMock = false;
+
+  bool get _busy => _picking || _processingMock;
 
   Future<void> _pickNew() async {
     setState(() => _picking = true);
@@ -119,12 +122,14 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
     }
   }
 
-  void _useMock() {
+  Future<void> _useMock() async {
+    setState(() => _processingMock = true);
+    await Future.delayed(const Duration(seconds: 5));
     api.setMockAnalytics(
       trafficLight: _kMockTrafficLight,
       forecast: _kMockForecast,
     );
-    Navigator.pop(context, PickedStatement('', [], isMock: true));
+    if (mounted) Navigator.pop(context, PickedStatement('', [], isMock: true));
   }
 
   @override
@@ -155,18 +160,18 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
                       Text('Загрузить выписку', style: dsH3()),
                       const Spacer(),
                       GestureDetector(
-                        onTap: () => Navigator.pop(context),
+                        onTap: _busy ? null : () => Navigator.pop(context),
                         child: Container(
                           width: 34, height: 34,
-                          decoration: const BoxDecoration(color: kCream, shape: BoxShape.circle),
-                          child: const Icon(Icons.close, size: 18, color: kInk1),
+                          decoration: BoxDecoration(color: kCream, shape: BoxShape.circle),
+                          child: Icon(Icons.close, size: 18, color: _busy ? kInk3 : kInk1),
                         ),
                       ),
                     ]),
                     const SizedBox(height: 20),
                     FpButton.gold(
                       full: true,
-                      onPressed: _picking ? null : _pickNew,
+                      onPressed: _busy ? null : _pickNew,
                       child: _picking
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: kInkOnGold))
                           : const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -187,54 +192,96 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
                     const SizedBox(height: 16),
                     FpOverline('Недавние файлы'),
                     const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: _useMock,
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: kCream,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: kLine, width: 1.5),
-                        ),
-                        child: Row(children: [
-                          Container(
-                            width: 44, height: 44,
-                            decoration: BoxDecoration(
-                              color: kGreenBg,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.table_chart_outlined, color: kForest900, size: 22),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _kMockDisplayName,
-                                  style: const TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1),
-                                ),
-                                const SizedBox(height: 2),
-                                Text('Альфа-Банк · 55 операций', style: dsCaption(color: kInk2)),
-                                Text('март – май 2026', style: dsCaption(color: kInk3)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          FpChip(
-                            bg: kGoldTint,
-                            color: kInkOnGold,
-                            child: const Text('Использовать', style: TextStyle(fontSize: 12)),
-                          ),
-                        ]),
-                      ),
-                    ),
+                    _processingMock ? _buildProcessingCard() : _buildFileCard(),
                   ],
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildProcessingCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kGoldTint,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kGoldDeep.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const SizedBox(
+              width: 20, height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.5, color: kGold),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Обрабатываем выписку…', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1)),
+              const SizedBox(height: 1),
+              Text(_kMockDisplayName, style: dsCaption(color: kInk2)),
+            ])),
+          ]),
+          const SizedBox(height: 14),
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(seconds: 5),
+            builder: (context, value, _) {
+              final msg = value < 0.3
+                  ? 'Читаем транзакции…'
+                  : value < 0.65
+                      ? 'Категоризируем операции ИИ…'
+                      : 'Строим финансовый прогноз…';
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: value,
+                    backgroundColor: kGoldSoft,
+                    valueColor: const AlwaysStoppedAnimation<Color>(kGold),
+                    minHeight: 5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(msg, style: dsCaption(color: kInk2)),
+              ]);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileCard() {
+    return GestureDetector(
+      onTap: _useMock,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: kCream,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: kLine, width: 1.5),
+        ),
+        child: Row(children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: kGreenBg, borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.table_chart_outlined, color: kForest900, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_kMockDisplayName, style: const TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1)),
+            const SizedBox(height: 2),
+            Text('Альфа-Банк · 55 операций', style: dsCaption(color: kInk2)),
+            Text('март – май 2026', style: dsCaption(color: kInk3)),
+          ])),
+          const SizedBox(width: 8),
+          FpChip(bg: kGoldTint, color: kInkOnGold, child: const Text('Использовать', style: TextStyle(fontSize: 12))),
+        ]),
       ),
     );
   }
