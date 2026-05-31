@@ -285,18 +285,26 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final wide = isWide(context);
+    final screens = [
+      HomeScreen(demoMode: widget.demoMode, onSwitchTab: (i) => setState(() => _tab = i), onLogout: widget.onLogout),
+      ForecastScreen(demoMode: widget.demoMode),
+      PetScreen(onLesson: () => setState(() => _tab = 4)),
+      const SavingsScreen(),
+      const LessonsScreen(),
+    ];
+    if (wide) {
+      return Scaffold(
+        backgroundColor: kCream,
+        body: Row(children: [
+          _SideNav(current: _tab, tabs: _tabs, onTap: (i) => setState(() => _tab = i)),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ]),
+      );
+    }
     return Scaffold(
       backgroundColor: kCream,
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          HomeScreen(demoMode: widget.demoMode, onSwitchTab: (i) => setState(() => _tab = i), onLogout: widget.onLogout),
-          ForecastScreen(demoMode: widget.demoMode),
-          PetScreen(onLesson: () => setState(() => _tab = 4)),
-          const SavingsScreen(),
-          const LessonsScreen(),
-        ],
-      ),
+      body: IndexedStack(index: _tab, children: screens),
       bottomNavigationBar: _BottomBar(current: _tab, tabs: _tabs, onTap: (i) => setState(() => _tab = i)),
     );
   }
@@ -330,6 +338,58 @@ class _BarItem extends StatelessWidget {
       Text(tab.label, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 10, color: color)),
       if (active) ...[const SizedBox(height: 3), Container(width: 4, height: 4, decoration: const BoxDecoration(color: kGold, shape: BoxShape.circle))],
     ]));
+  }
+}
+
+// ── Side Navigation (desktop) ─────────────────────────────────────────────────
+
+class _SideNav extends StatelessWidget {
+  final int current; final List<_TabItem> tabs; final ValueChanged<int> onTap;
+  const _SideNav({super.key, required this.current, required this.tabs, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 82,
+      decoration: const BoxDecoration(color: kSurface, border: Border(right: BorderSide(color: kLine))),
+      child: SafeArea(
+        child: Column(children: [
+          const SizedBox(height: 18),
+          const FpPetAvatar(size: 34),
+          const SizedBox(height: 18),
+          const Divider(color: kLine, height: 1),
+          const SizedBox(height: 6),
+          for (var i = 0; i < tabs.length; i++)
+            _SideNavItem(tab: tabs[i], active: i == current, onTap: () => onTap(i)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _SideNavItem extends StatelessWidget {
+  final _TabItem tab; final bool active; final VoidCallback onTap;
+  const _SideNavItem({super.key, required this.tab, required this.active, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? kForest900 : kInk3;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: active ? kForest900.withValues(alpha: 0.07) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(children: [
+          Icon(active ? tab.activeIcon : tab.icon, color: color, size: 22),
+          const SizedBox(height: 3),
+          Text(tab.label, style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 10, color: color)),
+          if (active) ...[const SizedBox(height: 3), Container(width: 4, height: 4, decoration: const BoxDecoration(color: kGold, shape: BoxShape.circle))],
+        ]),
+      ),
+    );
   }
 }
 
@@ -436,35 +496,55 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: kCream,
-    body: SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: _loading
-              ? const Center(child: CircularProgressIndicator(color: kGold))
-              : RefreshIndicator(
-                  color: kGold, onRefresh: _loadAll,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                    children: [
-                      _topBar(), const SizedBox(height: 8),
-                      FpOverline('Кредитный светофор'), const SizedBox(height: 12),
-                      if (widget.demoMode) ...[_demoBanner(), const SizedBox(height: 12)],
-                      if (_showDailyBanner) ...[_reminderBanner(daily: true), const SizedBox(height: 12)],
-                      if (_showWeeklyBanner) ...[_reminderBanner(daily: false), const SizedBox(height: 12)],
-                      _gaugeCard(), const SizedBox(height: 16),
-                      _planCard(), const SizedBox(height: 16),
-                      _petMiniCard(), const SizedBox(height: 16),
-                      FpButton.secondary(full: true, onPressed: _importStatement, child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.upload_file_outlined, size: 18, color: kInk1), SizedBox(width: 8), Text('Загрузить выписку')])),
-                    ],
+  Widget build(BuildContext context) {
+    final wide = isWide(context);
+    final importBtn = FpButton.secondary(
+      full: true,
+      onPressed: _importStatement,
+      child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.upload_file_outlined, size: 18, color: kInk1), SizedBox(width: 8), Text('Загрузить выписку')]),
+    );
+    return Scaffold(
+      backgroundColor: kCream,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: contentMaxWidth(context)),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: kGold))
+                : RefreshIndicator(
+                    color: kGold, onRefresh: _loadAll,
+                    child: ListView(
+                      padding: EdgeInsets.fromLTRB(16, 20, 16, wide ? 40 : 100),
+                      children: [
+                        _topBar(), const SizedBox(height: 8),
+                        FpOverline('Кредитный светофор'), const SizedBox(height: 12),
+                        if (widget.demoMode) ...[_demoBanner(), const SizedBox(height: 12)],
+                        if (_showDailyBanner) ...[_reminderBanner(daily: true), const SizedBox(height: 12)],
+                        if (_showWeeklyBanner) ...[_reminderBanner(daily: false), const SizedBox(height: 12)],
+                        if (wide) ...[
+                          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                              _gaugeCard(), const SizedBox(height: 16), _petMiniCard(),
+                            ])),
+                            const SizedBox(width: 16),
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                              _planCard(), const SizedBox(height: 16), importBtn,
+                            ])),
+                          ]),
+                        ] else ...[
+                          _gaugeCard(), const SizedBox(height: 16),
+                          _planCard(), const SizedBox(height: 16),
+                          _petMiniCard(), const SizedBox(height: 16),
+                          importBtn,
+                        ],
+                      ],
+                    ),
                   ),
-                ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   Widget _demoBanner() => Container(
     padding: const EdgeInsets.all(12),

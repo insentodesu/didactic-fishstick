@@ -74,6 +74,15 @@ TextStyle dsMetric({double size = 44, Color color = kInk1}) =>
     TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: size, color: color, letterSpacing: -size * 0.02, fontFeatures: [const FontFeature.tabularFigures()]);
 
 // ============================================================
+// Responsive helpers
+// ============================================================
+
+const double kDesktopBreak = 768.0;
+
+bool isWide(BuildContext ctx) => MediaQuery.sizeOf(ctx).width >= kDesktopBreak;
+double contentMaxWidth(BuildContext ctx) => isWide(ctx) ? 900.0 : 480.0;
+
+// ============================================================
 // Zone helpers
 // ============================================================
 

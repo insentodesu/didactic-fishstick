@@ -47,7 +47,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: BoxConstraints(maxWidth: contentMaxWidth(context)),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 380),
               switchInCurve: Curves.easeOut,
@@ -71,49 +71,70 @@ class _ForecastScreenState extends State<ForecastScreen> {
                   : RefreshIndicator(
                       color: kGold,
                       onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                        children: [
-                          FpFadeIn(delay: Duration.zero, child: FpOverline('Финансовый прогноз')),
-                          const SizedBox(height: 12),
-                          FpFadeIn(delay: const Duration(milliseconds: 80), child: _pdnDynamicsCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(delay: const Duration(milliseconds: 160), child: _monthSummaryCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(delay: const Duration(milliseconds: 240), child: _fixedExpensesCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(
-                            delay: const Duration(milliseconds: 300),
-                            child: FpButton.secondary(
-                          full: true,
-                          onPressed: () async {
-                            final file = await showStatementUploadSheet(context);
-                            if (file == null || !mounted) return;
-                            if (file.isMock) {
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Данные из выписки загружены.'), behavior: SnackBarBehavior.floating));
-                              _load();
-                              return;
-                            }
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
-                            try {
-                              await uploadStatement(file);
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выписка отправлена.'), behavior: SnackBarBehavior.floating));
-                              _load();
-                            } catch (_) {
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось отправить.'), behavior: SnackBarBehavior.floating));
-                            }
-                          },
-                          child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            Icon(Icons.upload_file_outlined, size: 18, color: kInk1),
-                            SizedBox(width: 8),
-                            Text('Загрузить выписку'),
-                          ]),
-                        ),
-                      ),
-                        ],
-                      ),
+                      child: Builder(builder: (ctx) {
+                        final wide = isWide(ctx);
+                        final uploadBtn = FpFadeIn(
+                          delay: const Duration(milliseconds: 300),
+                          child: FpButton.secondary(
+                            full: true,
+                            onPressed: () async {
+                              final file = await showStatementUploadSheet(context, demoMode: widget.demoMode);
+                              if (file == null || !mounted) return;
+                              if (file.isMock) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Данные из выписки загружены.'), behavior: SnackBarBehavior.floating));
+                                _load();
+                                return;
+                              }
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Отправка выписки…'), behavior: SnackBarBehavior.floating));
+                              try {
+                                await uploadStatement(file);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Выписка отправлена.'), behavior: SnackBarBehavior.floating));
+                                _load();
+                              } catch (_) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось отправить.'), behavior: SnackBarBehavior.floating));
+                              }
+                            },
+                            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              Icon(Icons.upload_file_outlined, size: 18, color: kInk1),
+                              SizedBox(width: 8),
+                              Text('Загрузить выписку'),
+                            ]),
+                          ),
+                        );
+                        return ListView(
+                          padding: EdgeInsets.fromLTRB(16, 20, 16, wide ? 40 : 100),
+                          children: [
+                            FpFadeIn(delay: Duration.zero, child: FpOverline('Финансовый прогноз')),
+                            const SizedBox(height: 12),
+                            if (wide) ...[
+                              FpFadeIn(
+                                delay: const Duration(milliseconds: 80),
+                                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Expanded(child: _pdnDynamicsCard()),
+                                  const SizedBox(width: 16),
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                    _monthSummaryCard(),
+                                    const SizedBox(height: 16),
+                                    _fixedExpensesCard(),
+                                  ])),
+                                ]),
+                              ),
+                              const SizedBox(height: 16),
+                              uploadBtn,
+                            ] else ...[
+                              FpFadeIn(delay: const Duration(milliseconds: 80), child: _pdnDynamicsCard()),
+                              const SizedBox(height: 16),
+                              FpFadeIn(delay: const Duration(milliseconds: 160), child: _monthSummaryCard()),
+                              const SizedBox(height: 16),
+                              FpFadeIn(delay: const Duration(milliseconds: 240), child: _fixedExpensesCard()),
+                              const SizedBox(height: 16),
+                              uploadBtn,
+                            ],
+                          ],
+                        );
+                      }),
                     ),
             ),
           ),

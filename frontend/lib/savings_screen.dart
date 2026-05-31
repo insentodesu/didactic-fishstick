@@ -112,7 +112,7 @@ class _SavingsScreenState extends State<SavingsScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: BoxConstraints(maxWidth: contentMaxWidth(context)),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 380),
               switchInCurve: Curves.easeOut,
@@ -137,7 +137,7 @@ class _SavingsScreenState extends State<SavingsScreen> {
                       color: kGold,
                       onRefresh: _load,
                       child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+                        padding: EdgeInsets.fromLTRB(16, 20, 16, isWide(context) ? 40 : 100),
                         children: [
                           FpFadeIn(delay: Duration.zero, child: FpOverline('Трекер накоплений')),
                           const SizedBox(height: 12),

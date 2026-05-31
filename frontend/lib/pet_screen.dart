@@ -160,7 +160,7 @@ class _PetScreenState extends State<PetScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: BoxConstraints(maxWidth: contentMaxWidth(context)),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 380),
               switchInCurve: Curves.easeOut,
@@ -184,20 +184,40 @@ class _PetScreenState extends State<PetScreen> {
                   : RefreshIndicator(
                       color: kGold,
                       onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
-                        children: [
-                          FpFadeIn(delay: Duration.zero, child: FpOverline('Твой питомец')),
-                          const SizedBox(height: 12),
-                          FpFadeIn(delay: const Duration(milliseconds: 80), child: _petCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(delay: const Duration(milliseconds: 160), child: _chooserCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(delay: const Duration(milliseconds: 240), child: _statsCard()),
-                          const SizedBox(height: 16),
-                          FpFadeIn(delay: const Duration(milliseconds: 300), child: _howToCard()),
-                        ],
-                      ),
+                      child: Builder(builder: (ctx) {
+                        final wide = isWide(ctx);
+                        return ListView(
+                          padding: EdgeInsets.fromLTRB(16, 20, 16, wide ? 40 : 100),
+                          children: [
+                            FpFadeIn(delay: Duration.zero, child: FpOverline('Твой питомец')),
+                            const SizedBox(height: 12),
+                            if (wide) ...[
+                              FpFadeIn(
+                                delay: const Duration(milliseconds: 80),
+                                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Expanded(child: _petCard()),
+                                  const SizedBox(width: 16),
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                    _chooserCard(),
+                                    const SizedBox(height: 16),
+                                    _statsCard(),
+                                    const SizedBox(height: 16),
+                                    _howToCard(),
+                                  ])),
+                                ]),
+                              ),
+                            ] else ...[
+                              FpFadeIn(delay: const Duration(milliseconds: 80), child: _petCard()),
+                              const SizedBox(height: 16),
+                              FpFadeIn(delay: const Duration(milliseconds: 160), child: _chooserCard()),
+                              const SizedBox(height: 16),
+                              FpFadeIn(delay: const Duration(milliseconds: 240), child: _statsCard()),
+                              const SizedBox(height: 16),
+                              FpFadeIn(delay: const Duration(milliseconds: 300), child: _howToCard()),
+                            ],
+                          ],
+                        );
+                      }),
                     ),
             ),
           ),

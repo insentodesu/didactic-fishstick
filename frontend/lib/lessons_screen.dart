@@ -38,9 +38,9 @@ class _LessonsScreenState extends State<LessonsScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: BoxConstraints(maxWidth: contentMaxWidth(context)),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 100),
+              padding: EdgeInsets.fromLTRB(16, 20, 16, isWide(context) ? 40 : 100),
               children: [
                 FpFadeIn(delay: Duration.zero, child: FpOverline('Уроки')),
                 const SizedBox(height: 8),
