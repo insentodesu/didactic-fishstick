@@ -151,6 +151,32 @@ async def scan_qr(
     }, details)
     await db.commit()
 
+    # Создаём транзакцию из чека
+    total = details["total_amount"] if details else float(parsed.get("amount") or 0)
+    seller = details["seller_name"] if details else "Магазин"
+    if total > 0:
+        tx_id = str(uuid.uuid4())
+        # Определяем категорию: еда = 1, прочее = 13
+        items = details.get("items", []) if details else []
+        category_id = 1 if any(
+            w in " ".join(i.get("name", "").lower() for i in items)
+            for w in ("молоко", "хлеб", "сыр", "кефир", "мясо", "рыба", "овощ", "фрукт", "колбас", "творог")
+        ) else 13
+        await db.execute(text("""
+            INSERT INTO transactions.transactions
+                (id, user_id, amount, is_income, merchant_name, description, transaction_date, category_id, category_confidence)
+            VALUES (:id, :uid, :amount, false, :merchant, :desc, CURRENT_DATE, :cat, 0.7)
+            ON CONFLICT DO NOTHING
+        """), {
+            "id": tx_id,
+            "uid": user_id,
+            "amount": total,
+            "merchant": (seller or "Магазин")[:500],
+            "desc": f"Чек #{receipt_id[:8]}",
+            "cat": category_id,
+        })
+        await db.commit()
+
     return {
         "receipt_id": receipt_id,
         "valid": result["valid"],

@@ -5,7 +5,7 @@ import 'api_client.dart' as api;
 import 'ds.dart';
 import 'statement_import.dart';
 
-class ForecastScreen extends StatefulWidget {
+class ForecastScreen extends StatefulWidget {\n  final bool demoMode;
   const ForecastScreen({super.key});
   @override
   State<ForecastScreen> createState() => _ForecastScreenState();

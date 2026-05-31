@@ -4,10 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.user import User
+import re
+
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
+    PhoneLoginRequest,
+    PhoneRegisterRequest,
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -19,6 +23,7 @@ from app.services.auth_service import (
     create_password_reset_token,
     create_refresh_token,
     get_user_by_email,
+    get_user_by_phone,
     hash_password,
     rotate_refresh_token,
     verify_password,
@@ -80,6 +85,51 @@ async def refresh_tokens(body: RefreshRequest, request: Request, db: AsyncSessio
     new_refresh, user_id = result
     access = create_access_token(user_id)
     return TokenResponse(access_token=access, refresh_token=new_refresh)
+
+
+@router.post("/register-phone", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register_phone(body: PhoneRegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Регистрация по номеру телефона + пароль."""
+    phone = re.sub(r"[^\d+]", "", body.phone)
+    existing = await get_user_by_phone(db, phone)
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Номер телефона уже зарегистрирован")
+
+    fake_email = f"phone_{phone.lstrip('+').replace(' ', '')}@finpet.local"
+    user = User(
+        email=fake_email,
+        phone=phone,
+        name=body.name,
+        password_hash=hash_password(body.password),
+    )
+    db.add(user)
+    await db.flush()
+
+    access = create_access_token(user.id)
+    refresh = await create_refresh_token(
+        db, user.id,
+        request.headers.get("user-agent"),
+        request.client.host if request.client else None,
+    )
+    await db.commit()
+    return TokenResponse(access_token=access, refresh_token=refresh)
+
+
+@router.post("/login-phone", response_model=TokenResponse)
+async def login_phone(body: PhoneLoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Вход по номеру телефона + пароль."""
+    phone = re.sub(r"[^\d+]", "", body.phone)
+    user = await get_user_by_phone(db, phone)
+    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный номер или пароль")
+
+    access = create_access_token(user.id)
+    refresh = await create_refresh_token(
+        db, user.id,
+        request.headers.get("user-agent"),
+        request.client.host if request.client else None,
+    )
+    return TokenResponse(access_token=access, refresh_token=refresh)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
