@@ -91,17 +91,18 @@ final _kMockForecast = <String, dynamic>{
 // ранее использованных файлов.
 // ---------------------------------------------------------------------------
 
-Future<PickedStatement?> showStatementUploadSheet(BuildContext context) {
+Future<PickedStatement?> showStatementUploadSheet(BuildContext context, {bool demoMode = false}) {
   return showModalBottomSheet<PickedStatement?>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => const _StatementUploadSheet(),
+    builder: (_) => _StatementUploadSheet(demoMode: demoMode),
   );
 }
 
 class _StatementUploadSheet extends StatefulWidget {
-  const _StatementUploadSheet();
+  final bool demoMode;
+  const _StatementUploadSheet({this.demoMode = false});
   @override
   State<_StatementUploadSheet> createState() => _StatementUploadSheetState();
 }
@@ -109,10 +110,13 @@ class _StatementUploadSheet extends StatefulWidget {
 class _StatementUploadSheetState extends State<_StatementUploadSheet> {
   bool _picking = false;
   bool _processingMock = false;
+  bool _demoLoading = false;
+  bool _demoError = false;
 
-  bool get _busy => _picking || _processingMock;
+  bool get _busy => _picking || _processingMock || _demoLoading;
 
   Future<void> _pickNew() async {
+    if (widget.demoMode) { _demoDenied(); return; }
     setState(() => _picking = true);
     try {
       final file = await pickStatementFile();
@@ -130,6 +134,12 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
       forecast: _kMockForecast,
     );
     if (mounted) Navigator.pop(context, PickedStatement('', [], isMock: true));
+  }
+
+  Future<void> _demoDenied() async {
+    setState(() { _demoLoading = true; _demoError = false; });
+    await Future.delayed(const Duration(seconds: 3));
+    if (mounted) setState(() { _demoLoading = false; _demoError = true; });
   }
 
   @override
@@ -172,7 +182,7 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
                     FpButton.gold(
                       full: true,
                       onPressed: _busy ? null : _pickNew,
-                      child: _picking
+                      child: (_picking || _demoLoading)
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: kInkOnGold))
                           : const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                               Icon(Icons.upload_file_outlined, size: 18, color: kInkOnGold),
@@ -180,6 +190,10 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
                               Text('Загрузить файл'),
                             ]),
                     ),
+                    if (_demoLoading || _demoError) ...[
+                      const SizedBox(height: 12),
+                      _demoLoading ? _buildDemoLoadingCard() : _buildDemoErrorCard(),
+                    ],
                     const SizedBox(height: 24),
                     Row(children: [
                       const Expanded(child: Divider(color: kLine)),
@@ -253,6 +267,60 @@ class _StatementUploadSheetState extends State<_StatementUploadSheet> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDemoLoadingCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kGoldTint,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kGoldDeep.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: kGold)),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Проверяем доступность загрузки…', style: TextStyle(fontFamily: kFontDisplay, fontWeight: FontWeight.w700, fontSize: 14, color: kInk1))),
+          ]),
+          const SizedBox(height: 14),
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(seconds: 3),
+            builder: (context, value, _) => ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: value,
+                backgroundColor: kGoldSoft,
+                valueColor: const AlwaysStoppedAnimation<Color>(kGold),
+                minHeight: 5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemoErrorCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kRedBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kRedRing, width: 1.5),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.error_outline, color: kRed, size: 22),
+        const SizedBox(width: 12),
+        const Expanded(child: Text(
+          'Ранее вы уже загружали выписку, эту операцию можно проводить только раз в 3 дня',
+          style: TextStyle(fontFamily: kFontText, fontSize: 14, color: kRed, height: 1.4),
+        )),
+      ]),
     );
   }
 

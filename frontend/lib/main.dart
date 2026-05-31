@@ -411,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _importStatement() async {
     try {
-      final file = await showStatementUploadSheet(context);
+      final file = await showStatementUploadSheet(context, demoMode: widget.demoMode);
       if (file == null || !mounted) return;
 
       if (file.isMock) {
